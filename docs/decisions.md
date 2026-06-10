@@ -43,3 +43,11 @@ integer ids: they appear in URLs (`/order/status/[id]`) and confirmation
 screens, and a guessable sequential integer invites demo visitors to pull
 up each other's fake orders. Codes are generated from a non-ambiguous
 alphabet (no 0/O/1/I).
+
+## D-006: Menu filter chip says "Nut-Free", not "Contains Nuts" (2026-06-10)
+
+The spec lists the fourth sticky filter as "Contains Nuts". A filter chip
+with that label is ambiguous at best (show items WITH nuts?) and the real
+user need is allergy avoidance, so the chip is labeled "Nut-Free" and
+excludes items flagged contains_nuts. Items still display an "N / Contains
+nuts" badge inline, which is the informational half of the spec's intent.
