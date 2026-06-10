@@ -3,21 +3,39 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --harbor-teal: #1c4e54;
+  --harbor-cream: #f8f1e4;
+  --harbor-coral: #d9744a;
+  --harbor-ink: #2c1f1a;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply bg-harbor-cream text-harbor-ink font-sans antialiased;
+    /* Subtle paper grain: two ultra-low-contrast layers, no image request */
+    background-image: radial-gradient(
+        rgba(44, 31, 26, 0.025) 1px,
+        transparent 1px
+      ),
+      linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
+    background-size: 5px 5px, 100% 320px;
+    background-repeat: repeat, no-repeat;
   }
-}
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  h1,
+  h2,
+  h3 {
+    @apply font-serif text-harbor-teal;
+  }
+
+  ::selection {
+    background: rgba(217, 116, 74, 0.3);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--harbor-coral);
+    outline-offset: 2px;
+  }
 }
 
 @layer utilities {

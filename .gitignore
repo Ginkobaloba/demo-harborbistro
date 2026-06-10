@@ -28,6 +28,15 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# sqlite database (created by npm run db:seed)
+/data/*.db
+/data/*.db-journal
+/data/*.db-wal
+/data/*.db-shm
+
+# per-device session log (session protocol)
+.session-log
+
 # vercel
 .vercel
 
