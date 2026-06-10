@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import { DemoBanner } from "@/components/site/DemoBanner";
 import { ParadigmBanner } from "@/components/site/ParadigmBanner";
+import { SiteHeader } from "@/components/site/SiteHeader";
+import { SiteFooter } from "@/components/site/SiteFooter";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -32,7 +34,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${fraunces.variable} ${inter.variable} flex min-h-screen flex-col`}>
+        <SiteHeader />
         <div className="flex-1">{children}</div>
+        <SiteFooter />
         <DemoBanner />
         <ParadigmBanner />
       </body>
