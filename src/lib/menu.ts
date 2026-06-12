@@ -63,6 +63,13 @@ export function getMenuByCourse(): Map<Course, MenuItem[]> {
   return grouped;
 }
 
+export function getAllSlugs(): string[] {
+  const rows = getDb()
+    .prepare("SELECT slug FROM menu_items ORDER BY sort_order")
+    .all() as { slug: string }[];
+  return rows.map((row) => row.slug);
+}
+
 export function getItemBySlug(slug: string): MenuItem | null {
   const row = getDb()
     .prepare("SELECT * FROM menu_items WHERE slug = ?")
