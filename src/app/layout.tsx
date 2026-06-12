@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
+import { CartDrawer } from "@/components/cart/CartDrawer";
+import { CartProvider } from "@/components/cart/CartProvider";
 import { DemoBanner } from "@/components/site/DemoBanner";
 import { ParadigmBanner } from "@/components/site/ParadigmBanner";
 import { SiteHeader } from "@/components/site/SiteHeader";
@@ -34,11 +36,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${fraunces.variable} ${inter.variable} flex min-h-screen flex-col`}>
-        <SiteHeader />
-        <div className="flex-1">{children}</div>
-        <SiteFooter />
-        <DemoBanner />
-        <ParadigmBanner />
+        <CartProvider>
+          <SiteHeader />
+          <div className="flex-1">{children}</div>
+          <SiteFooter />
+          <DemoBanner />
+          <ParadigmBanner />
+          <CartDrawer />
+        </CartProvider>
       </body>
     </html>
   );
