@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  MAX_LINE_QUANTITY as MAX_QUANTITY,
+  useCart,
+} from "@/components/cart/CartProvider";
 import { formatPrice } from "@/lib/menu-format";
 import type { CustomizationGroup, MenuItem } from "@/lib/types";
-
-const MAX_QUANTITY = 12;
 
 type Selections = Record<string, string | string[]>;
 
@@ -20,17 +22,46 @@ function upcharge(choice: { priceCents?: number }): number {
   return choice.priceCents ?? 0;
 }
 
+/**
+ * Drawer labels for the chosen options. Skips the zero-information default
+ * on optional single groups (first choice, no upcharge, e.g. "No thanks")
+ * but always names required choices like steak temperature.
+ */
+function selectionLabels(
+  groups: CustomizationGroup[],
+  selections: Selections,
+): string[] {
+  const labels: string[] = [];
+  for (const group of groups) {
+    const selected = selections[group.id];
+    if (group.type === "single") {
+      const index = group.choices.findIndex((c) => c.id === selected);
+      if (index === -1) continue;
+      const choice = group.choices[index];
+      if (group.required || index > 0 || upcharge(choice) > 0) {
+        labels.push(choice.label);
+      }
+    } else {
+      for (const choice of group.choices) {
+        if ((selected as string[]).includes(choice.id)) {
+          labels.push(choice.label);
+        }
+      }
+    }
+  }
+  return labels;
+}
+
 export function ItemCustomizer({ item }: { item: MenuItem }) {
   const groups = item.customizationOptions;
+  const { addLine, openCart } = useCart();
   const [selections, setSelections] = useState<Selections>(() =>
     initialSelections(groups),
   );
   const [quantity, setQuantity] = useState(1);
-  const [notice, setNotice] = useState<string | null>(null);
 
   function pickSingle(groupId: string, choiceId: string) {
     setSelections((prev) => ({ ...prev, [groupId]: choiceId }));
-    setNotice(null);
   }
 
   function toggleMulti(groupId: string, choiceId: string) {
@@ -41,7 +72,6 @@ export function ItemCustomizer({ item }: { item: MenuItem }) {
         : [...current, choiceId];
       return { ...prev, [groupId]: next };
     });
-    setNotice(null);
   }
 
   const unitPriceCents = useMemo(() => {
@@ -65,10 +95,16 @@ export function ItemCustomizer({ item }: { item: MenuItem }) {
   const totalCents = unitPriceCents * quantity;
 
   function handleAdd() {
-    // Stub until chunk 3.6 wires the cart drawer.
-    setNotice(
-      `${quantity} x ${item.name} (${formatPrice(totalCents)}) noted. The cart and online ordering arrive in the next update.`,
-    );
+    addLine({
+      slug: item.slug,
+      name: item.name,
+      quantity,
+      unitPriceCents,
+      selections,
+      selectionLabels: selectionLabels(groups, selections),
+    });
+    setQuantity(1);
+    openCart();
   }
 
   return (
@@ -135,10 +171,7 @@ export function ItemCustomizer({ item }: { item: MenuItem }) {
             type="button"
             aria-label="Decrease quantity"
             disabled={quantity <= 1}
-            onClick={() => {
-              setQuantity((q) => Math.max(1, q - 1));
-              setNotice(null);
-            }}
+            onClick={() => setQuantity((q) => Math.max(1, q - 1))}
             className="px-4 py-2 text-lg text-harbor-teal disabled:opacity-30"
           >
             &minus;
@@ -150,10 +183,7 @@ export function ItemCustomizer({ item }: { item: MenuItem }) {
             type="button"
             aria-label="Increase quantity"
             disabled={quantity >= MAX_QUANTITY}
-            onClick={() => {
-              setQuantity((q) => Math.min(MAX_QUANTITY, q + 1));
-              setNotice(null);
-            }}
+            onClick={() => setQuantity((q) => Math.min(MAX_QUANTITY, q + 1))}
             className="px-4 py-2 text-lg text-harbor-teal disabled:opacity-30"
           >
             +
@@ -167,15 +197,6 @@ export function ItemCustomizer({ item }: { item: MenuItem }) {
           Add to Cart &middot; {formatPrice(totalCents)}
         </button>
       </div>
-
-      {notice && (
-        <p
-          role="status"
-          className="mt-4 rounded-xl bg-harbor-teal/10 px-4 py-3 text-sm text-harbor-teal"
-        >
-          {notice}
-        </p>
-      )}
     </div>
   );
 }

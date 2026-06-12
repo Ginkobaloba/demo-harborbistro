@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CartButton } from "@/components/cart/CartButton";
 
 const NAV = [
   { href: "/menu", label: "Menu" },
@@ -48,12 +49,15 @@ export function SiteHeader() {
             </Link>
           ))}
         </nav>
-        <Link
-          href="/order"
-          className="rounded-full bg-harbor-coral px-4 py-2 text-sm font-medium text-white shadow-warm transition-colors hover:bg-harbor-coral-deep"
-        >
-          Order Online
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/order"
+            className="rounded-full bg-harbor-coral px-4 py-2 text-sm font-medium text-white shadow-warm transition-colors hover:bg-harbor-coral-deep"
+          >
+            Order Online
+          </Link>
+          <CartButton />
+        </div>
       </div>
       <nav
         aria-label="Main, compact"

@@ -51,3 +51,18 @@ with that label is ambiguous at best (show items WITH nuts?) and the real
 user need is allergy avoidance, so the chip is labeled "Nut-Free" and
 excludes items flagged contains_nuts. Items still display an "N / Contains
 nuts" badge inline, which is the informational half of the spec's intent.
+
+## D-007: Cart state is React Context + useReducer, not Zustand (2026-06-12)
+
+The spec allows either. Context wins here because the cart's API surface is
+tiny (add, remove, set quantity, clear, open/close drawer), the consumer
+count is three components (header badge, drawer, item customizer), and the
+repo posture is minimal dependencies (no shadcn, hand-rolled primitives).
+Zustand's advantages (selector-level re-render control, persist middleware,
+no provider) do not pay for a new dependency at this scale. Persistence is
+sessionStorage with hydrate-after-mount so server and first client render
+agree on an empty cart (no hydration mismatch); per spec, in-memory was
+acceptable and sessionStorage is the nice-to-have. Cart lines carry a
+canonical key (slug + sorted selections) so identical configurations merge
+instead of duplicating lines. Revisit only if the cart grows cross-cutting
+consumers (e.g. per-item quantity badges on the full menu grid).
