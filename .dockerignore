@@ -1,0 +1,8 @@
+.git
+.next
+node_modules
+data
+docs
+*.md
+.env*
+.pr-body.tmp.md
