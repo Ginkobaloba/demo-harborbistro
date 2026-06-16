@@ -3,7 +3,7 @@ import { CartButton } from "@/components/cart/CartButton";
 
 const NAV = [
   { href: "/menu", label: "Menu" },
-  { href: "/reserve", label: "Reserve" },
+  { href: "/reservations", label: "Reservations" },
   { href: "/about", label: "About" },
   { href: "/visit", label: "Visit" },
   { href: "/private-events", label: "Private Events" },
@@ -51,7 +51,7 @@ export function SiteHeader() {
         </nav>
         <div className="flex items-center gap-3">
           <Link
-            href="/order"
+            href="/menu"
             className="rounded-full bg-harbor-coral px-4 py-2 text-sm font-medium text-white shadow-warm transition-colors hover:bg-harbor-coral-deep"
           >
             Order Online
