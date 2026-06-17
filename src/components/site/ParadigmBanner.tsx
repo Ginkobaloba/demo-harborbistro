@@ -75,16 +75,16 @@ export function ParadigmBanner() {
   };
 
   return (
-    <div role="region" aria-label="Built by Paradigm" style={styles.banner}>
+    <div role="region" aria-label="Paradigm studio CTA" style={styles.banner}>
       <span>
-        {"This demo was built by "}
+        {"Built by Paradigm Coding Solutions. Want one like it for your data? "}
         <a
-          href="https://projectnexuscode.org/"
+          href="https://projectnexuscode.org/contact"
           target="_blank"
           rel="noopener noreferrer"
           style={styles.link}
         >
-          Paradigm
+          Talk to us
         </a>
       </span>
       <button
