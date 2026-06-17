@@ -40,8 +40,9 @@ CREATE TABLE IF NOT EXISTS orders (
   tip_cents INTEGER NOT NULL DEFAULT 0 CHECK (tip_cents >= 0),
   total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
   status TEXT NOT NULL CHECK (status IN
-    ('received','preparing','ready','completed')),
+    ('pending','received','preparing','ready','completed','cancelled')),
   stripe_payment_intent_id TEXT,
+  stripe_checkout_session_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

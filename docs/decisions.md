@@ -89,3 +89,33 @@ acceptable and sessionStorage is the nice-to-have. Cart lines carry a
 canonical key (slug + sorted selections) so identical configurations merge
 instead of duplicating lines. Revisit only if the cart grows cross-cutting
 consumers (e.g. per-item quantity badges on the full menu grid).
+
+## D-010: Chunk 3.7 uses Stripe-hosted Checkout, server-side repricing, pending orders (2026-06-17)
+
+Online ordering (the /order route, previously a dead link) now runs real
+Stripe test-mode payments. Decisions:
+
+- **Stripe-hosted Checkout, not embedded.** The card form lives on Stripe's
+  page, so the demo never touches PAN data and stays out of PCI scope. The
+  /order page collects cart + customer details, POSTs to /api/checkout, and
+  redirects to the returned session URL.
+- **Server-side repricing is the integrity gate.** /api/checkout never trusts
+  a client price. priceCart() re-derives every line from the menu db (base
+  price plus per-choice upcharges) and rejects unknown items, bad quantities,
+  and invalid or missing-required selections. Same posture as db:verify for
+  the seed.
+- **Orders are created `pending`, confirmed on payment.** A new order row is
+  inserted before redirect (status pending), then moved to `received` by both
+  the webhook (checkout.session.completed) and the confirmation page's Stripe
+  reconcile, idempotently. This added `pending` and `cancelled` to the order
+  status set and a stripe_checkout_session_id column. The kitchen/customer
+  only ever see paid orders as real.
+- **Absolute URLs come from the Host header, never request.url.** Stripe
+  success/cancel URLs must be absolute and public; the Next standalone server
+  reports 0.0.0.0:3000 as its origin (same root cause as the redirect bug
+  fixed fleet-wide), so publicOrigin() reads X-Forwarded-Host/Host (the proxy
+  sets the real host) with a PUBLIC_BASE_URL env override.
+- **Keys are runtime-only.** STRIPE_SECRET_KEY (and STRIPE_WEBHOOK_SECRET) are
+  read lazily at request time so `next build` needs no key; checkout degrades
+  to a clear 503 when unconfigured. The deploy must inject these env vars into
+  the container (deploy-demo.ps1 does not pass env yet -- tracked separately).
