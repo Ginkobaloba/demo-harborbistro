@@ -55,19 +55,23 @@ export type MenuItem = {
 };
 
 export const ORDER_STATUSES = [
+  "pending",
   "received",
   "preparing",
   "ready",
   "completed",
+  "cancelled",
 ] as const;
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  pending: "Awaiting Payment",
   received: "Received",
   preparing: "Preparing",
   ready: "Ready for Pickup",
   completed: "Completed",
+  cancelled: "Cancelled",
 };
 
 export type Fulfillment = "pickup" | "delivery";
@@ -94,6 +98,7 @@ export type Order = {
   totalCents: number;
   status: OrderStatus;
   stripePaymentIntentId: string | null;
+  stripeCheckoutSessionId: string | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import Link from "next/link";
 import { formatPrice } from "@/lib/menu-format";
 import { MAX_LINE_QUANTITY, useCart } from "./CartProvider";
 
@@ -14,13 +15,9 @@ export function CartDrawer() {
     setQuantity,
   } = useCart();
   const panelRef = useRef<HTMLDivElement>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isOpen) {
-      setNotice(null);
-      return;
-    }
+    if (!isOpen) return;
     panelRef.current?.focus();
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") closeCart();
@@ -128,25 +125,22 @@ export function CartDrawer() {
               {formatPrice(subtotalCents)}
             </span>
           </div>
-          <button
-            type="button"
-            disabled={lines.length === 0}
-            onClick={() =>
-              setNotice(
-                "Checkout is almost here. Online payment (test mode) goes live in the next update.",
-              )
-            }
-            className="mt-3 w-full rounded-full bg-harbor-coral px-6 py-3 font-medium text-white shadow-warm-lg transition-colors hover:bg-harbor-coral-deep disabled:opacity-40"
-          >
-            Checkout
-          </button>
-          {notice && (
-            <p
-              role="status"
-              className="mt-3 rounded-xl bg-harbor-teal/10 px-4 py-3 text-sm text-harbor-teal"
+          {lines.length === 0 ? (
+            <button
+              type="button"
+              disabled
+              className="mt-3 w-full rounded-full bg-harbor-coral px-6 py-3 font-medium text-white shadow-warm-lg disabled:opacity-40"
             >
-              {notice}
-            </p>
+              Checkout
+            </button>
+          ) : (
+            <Link
+              href="/order"
+              onClick={closeCart}
+              className="mt-3 block w-full rounded-full bg-harbor-coral px-6 py-3 text-center font-medium text-white shadow-warm-lg transition-colors hover:bg-harbor-coral-deep"
+            >
+              Checkout
+            </Link>
           )}
         </footer>
       </div>
