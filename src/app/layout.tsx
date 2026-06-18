@@ -19,13 +19,43 @@ const inter = Inter({
   variable: "--font-sans",
 });
 
+const SITE_URL = "https://harborbistro.projectnexuscode.org";
+const SITE_DESCRIPTION =
+  "Coastal-inspired, locally sourced, weeknight-easy. Harbor Bistro serves upscale-casual coastal American food on the harborfront. Order online for pickup or delivery, or reserve a table.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "Harbor Bistro | Coastal-inspired, locally sourced",
     template: "%s | Harbor Bistro",
   },
-  description:
-    "Coastal-inspired, locally sourced, weeknight-easy. Harbor Bistro serves upscale-casual coastal American food on the harborfront. Order online for pickup or delivery, or reserve a table.",
+  description: SITE_DESCRIPTION,
+  robots: { index: false, follow: false },
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    siteName: "Harbor Bistro",
+    title: "Harbor Bistro",
+    description: SITE_DESCRIPTION,
+    url: SITE_URL,
+    locale: "en_US",
+    images: [
+      {
+        url: "/og-default.png",
+        width: 1200,
+        height: 630,
+        alt: "Harbor Bistro, a Paradigm Coding Solutions portfolio demo.",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Harbor Bistro",
+    description: SITE_DESCRIPTION,
+    images: ["/og-default.png"],
+  },
 };
 
 export default function RootLayout({
