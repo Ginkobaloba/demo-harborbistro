@@ -119,3 +119,38 @@ Stripe test-mode payments. Decisions:
   read lazily at request time so `next build` needs no key; checkout degrades
   to a clear 503 when unconfigured. The deploy must inject these env vars into
   the container (deploy-demo.ps1 does not pass env yet -- tracked separately).
+
+## D-011: Chunk 4b federates auth to the Paradigm Portal via JWKS (2026-06-19)
+
+Harbor Bistro now accepts portal-minted access tokens as the entry to a
+signed-in session. Decisions:
+
+- **Local JWKS verification per the gate contract.** verifyPortalToken
+  fetches and caches the portal's `/.well-known/jwks.json`, then validates
+  RS256 tokens with `iss=https://portal.projectnexuscode.org`,
+  `aud=harborbistro`, and a non-empty `sub`. The contract's authoritative
+  `/api/portal-check` path stays available for higher-stakes calls if a
+  later feature needs it; v1 is local-only.
+- **Fragment handoff over cookie.** Portal redirects to
+  `/portal/handoff#portal_token=...`. The client page reads
+  window.location.hash, scrubs it from history before doing anything else,
+  then POSTs the token to `/api/auth/portal-handoff`. The fragment never
+  reaches an HTTP server log on either side, which matches the
+  contract's reasoning.
+- **HS256 session cookie, 12h TTL, name `hb_session`.** Asymmetric keys
+  inside a single tenant would be wasted complexity. Cookie is HttpOnly,
+  SameSite=Lax, Secure in production. SESSION_SECRET must be 32 chars or
+  longer; mint helper throws otherwise so misconfigured deploys fail
+  loudly rather than ship a guessable secret.
+- **Rotation grace via the jose JWKS cache.** createRemoteJWKSet caches
+  the JWKS for one hour (matches the portal's Cache-Control) and refetches
+  once per 30s on a kid miss, so a published rotation lands inside a
+  minute without hammering the portal.
+- **Generic 401 on any verify failure.** invalid_token, missing_token,
+  bad_request, config_error are the only public reason codes. Detailed
+  cryptographic failure modes are intentionally not surfaced; the gate
+  contract says the same.
+- **Existing surfaces stay open for now.** Harbor had no real auth before
+  this chunk (admin/reservations is open in dev). Federation adds the
+  signed-in path; a follow-on chunk will gate admin and post-checkout
+  surfaces behind readHarborSession.
