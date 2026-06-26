@@ -34,3 +34,30 @@ npm run dev
 
 - Design decisions: `docs/decisions.md`
 - Session handoffs: `docs/handoffs/`
+
+## Verification
+
+This repo carries a `verify/` suite (see `verify/README.md` for full details).
+
+**Quick smoke** -- run on every PR via CI, checks HTTP status, key copy, and
+security headers against the live deploy at
+`https://harborbistro.projectnexuscode.org`:
+
+```
+/verify verify/smoke.yml
+```
+
+**Deep verify** -- required before merging any PR that touches a tier-3 surface
+(reservations or order/checkout). Runs richer assertions including DOM selectors,
+accessibility, and LCP; layers 5-6 run locally with a headed browser:
+
+```
+/verify deep verify/assertions/reservations.yml
+/verify deep verify/assertions/home.yml
+```
+
+**CI behavior** -- GitHub Actions runs quick smoke on every PR
+(`.github/workflows/verify.yml`). PRs labelled `tier-3` additionally require
+`deep-verify` to pass (a committed report under `verify/reports/` recording
+`Overall: PASS`). Add `deep-verify` as a required status check in branch
+protection to enforce the gate.

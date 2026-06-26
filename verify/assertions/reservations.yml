@@ -1,0 +1,60 @@
+# assertions/reservations.yml -- full assertion set for the reservations surface
+#
+# Tier 3 surface: writes to SQLite, captures user data (name, phone, email).
+# Runs during deep verify (/verify deep) before any PR touching this surface
+# can merge. Layers 5-6 (headed Chrome, adversarial) run locally only.
+
+surface: reservations
+url: /reservations
+
+assertions:
+  # Layer 1: HTTP and transport
+  - { type: http_status, expect: 200 }
+  - { type: header_present, header: "Strict-Transport-Security" }
+
+  # Layer 1: key copy -- page must identify itself correctly
+  - { type: text_present, text: "Reserve a Table" }
+  - { type: text_present, text: "Tables for 1 to 12" }
+  - { type: text_present, text: "Walk-ins always welcome at the bar" }
+  - { type: text_present, text: "Hours" }
+  - { type: text_present, text: "Tuesday" }
+
+  # Layer 2: form DOM -- every required field must be present and labelled
+  - { type: selector_present, selector: "form" }
+  - { type: selector_present, selector: "input#date" }
+  - { type: selector_present, selector: "select#partySize" }
+  - { type: selector_present, selector: "input#name" }
+  - { type: selector_present, selector: "input#phone" }
+  - { type: selector_present, selector: "input#email" }
+  - { type: selector_present, selector: "textarea#notes" }
+  # Submit button (disabled until a time slot is selected -- presence still required)
+  - { type: selector_present, selector: "button[type='submit']" }
+  # Party size select must have options up to 12
+  - { type: selector_present, selector: "select#partySize option[value='12']" }
+
+  # Layer 2: slots API integration -- the page fetches /api/reservations?date=...
+  # on mount; a broken API call leaves the time section in "Checking availability..."
+  # Covered by the api-slots smoke entry and the headed local run.
+
+  # Layer 3: API contract (slots endpoint)
+  # Verify the reservations API returns the expected shape for a valid open date.
+  # 2026-07-07 is a Tuesday, guaranteed open per RESTAURANT.hours.
+  # (This assertion runs against the API route directly, not the page.)
+  - type: json_path_equals
+    url: /api/reservations?date=2026-07-07
+    path: "$.isClosed"
+    expect: false
+
+  # Monday must report isClosed: true
+  - type: json_path_equals
+    url: /api/reservations?date=2026-07-06
+    path: "$.isClosed"
+    expect: true
+
+  # Layer 4: quality
+  - { type: no_console_errors }
+  - { type: axe_no_critical }
+
+  # Layer 5 (local headed only): fill the form with test data, select a slot,
+  # submit, and assert redirect to /reservations/<id> with confirmation text.
+  # This cannot run in CI -- see verify/ci/deep_gate.sh and tier3_gate.md.

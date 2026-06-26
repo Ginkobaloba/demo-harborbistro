@@ -1,0 +1,44 @@
+# assertions/home.yml -- full assertion set for the Harbor Bistro home surface
+#
+# Runs during deep verify (/verify deep). Richer than the smoke.yml entry.
+# Browser-dependent assertions (selector_present, no_console_errors, lcp_under_ms,
+# axe_no_critical) require a headless or headed browser run; CI covers layers 1-4.
+
+surface: home
+url: /
+
+assertions:
+  # Layer 1: HTTP
+  - { type: http_status, expect: 200 }
+  - { type: header_present, header: "Strict-Transport-Security" }
+
+  # Layer 1: key copy -- hero headline and tagline are the demo's first impression
+  - { type: text_present, text: "Dinner by the water, minus the production" }
+  - { type: text_present, text: "Coastal-inspired, locally sourced, weeknight-easy." }
+  - { type: text_present, text: "Reserve a Table" }
+  - { type: text_present, text: "See the Menu" }
+  - { type: text_present, text: "This week" }
+  - { type: text_present, text: "Good fish, short menu, honest hours" }
+  - { type: text_present, text: "412 Harborline Drive" }
+  - { type: text_present, text: "Tue-Sun from 4pm" }
+  - { type: text_present, text: "Harbor Bistro" }
+
+  # Layer 2: DOM -- rendered elements required for the demo to read correctly
+  - { type: selector_present, selector: "main" }
+  - { type: selector_present, selector: "section" }
+  # Hero CTAs
+  - { type: selector_present, selector: "a[href='/reserve']" }
+  - { type: selector_present, selector: "a[href='/menu']" }
+  # Featured menu grid
+  - { type: selector_present, selector: "ul li a[href^='/menu/']" }
+  # Site header nav
+  - { type: selector_present, selector: "header" }
+  # Demo disclaimer banner (DemoBanner component, required per CLAUDE.md)
+  - { type: selector_present, selector: "[data-testid='demo-banner'], footer, [class*='DemoBanner'], [class*='demo']" }
+
+  # Layer 3: performance (mobile-first per CLAUDE.md, LCP target < 1500ms)
+  - { type: lcp_under_ms, expect: 1500 }
+
+  # Layer 4: quality
+  - { type: no_console_errors }
+  - { type: axe_no_critical }

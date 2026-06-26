@@ -1,0 +1,50 @@
+# tier_map.yml -- surface risk classification for Harbor Bistro
+#
+# Tiers:
+#   1 -- informational / low stakes; smoke-only is sufficient
+#   2 -- moderate stakes; smoke required, deep recommended
+#   3 -- high stakes; deep-verify REQUIRED before merge
+#
+# Harbor Bistro has two meaningful interactive surfaces: reservations (writes
+# to SQLite, sends confirmation, user data captured) and order/checkout
+# (redirects through Stripe, even in test mode the flow is irreversible from
+# the user's perspective and exercises the webhook path). Both are tier 3.
+# Static marketing pages (about, visit, private-events) are tier 1.
+# The menu and home are tier 2: they are read-only but are the primary
+# conversion surfaces -- a regression here loses demo impact.
+
+surfaces:
+  - name: reservations
+    tier: 3
+    deep_verify_before_merge: true
+    reason: "Writes a reservation record to SQLite and returns a confirmation ID. User data (name, phone, email) is captured and stored. A broken form silently fails the primary demo conversion flow."
+
+  - name: order-checkout
+    tier: 3
+    deep_verify_before_merge: true
+    reason: "Calls /api/checkout which creates a Stripe Checkout session and redirects the browser. The webhook path (/api/webhooks/stripe) updates order state on payment.succeeded. Even in test mode, a broken redirect or missing webhook handler leaves orders in a stuck state and breaks the demo story end to end."
+
+  - name: home
+    tier: 2
+    deep_verify_before_merge: false
+    reason: "Primary landing surface and demo first impression. Read-only, no data submission, but hero copy and CTA links are the first thing a prospect sees -- visual or copy regression here has high demo-presentation impact."
+
+  - name: menu
+    tier: 2
+    deep_verify_before_merge: false
+    reason: "Read-only menu browser. No writes. Regression risk is low but the menu is the core product surface of the restaurant demo, so deep verify is recommended before any content or layout change."
+
+  - name: about
+    tier: 1
+    deep_verify_before_merge: false
+    reason: "Static marketing copy. No interactivity, no data capture. Smoke check is sufficient."
+
+  - name: visit
+    tier: 1
+    deep_verify_before_merge: false
+    reason: "Static hours and location page. No interactivity."
+
+  - name: private-events
+    tier: 1
+    deep_verify_before_merge: false
+    reason: "Static marketing page. No form, no data capture."
