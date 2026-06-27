@@ -34,7 +34,7 @@ export default function Home() {
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
-              href="/reserve"
+              href="/reservations"
               className="rounded-full bg-harbor-coral px-6 py-3 font-medium text-white shadow-warm-lg transition-colors hover:bg-harbor-coral-deep"
             >
               Reserve a Table
@@ -150,7 +150,7 @@ export default function Home() {
               Tables for 1 to 12. Walk-ins always welcome at the bar.
             </p>
             <Link
-              href="/reserve"
+              href="/reservations"
               className="mt-6 inline-block rounded-full bg-harbor-teal px-8 py-3 font-medium text-harbor-cream transition-colors hover:bg-harbor-teal-deep"
             >
               Reserve a Table
