@@ -29,8 +29,18 @@ function matches(item: MenuItem, active: Set<FilterKey>): boolean {
   return true;
 }
 
+function matchesQuery(item: MenuItem, query: string): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return (
+    item.name.toLowerCase().includes(q) ||
+    item.description.toLowerCase().includes(q)
+  );
+}
+
 export function MenuBrowser({ items }: { items: MenuItem[] }) {
   const [active, setActive] = useState<Set<FilterKey>>(new Set());
+  const [query, setQuery] = useState("");
 
   function toggle(key: FilterKey) {
     setActive((prev) => {
@@ -51,15 +61,19 @@ export function MenuBrowser({ items }: { items: MenuItem[] }) {
     const grouped = new Map<Course, MenuItem[]>();
     for (const course of COURSES) grouped.set(course, []);
     for (const item of items) {
-      if (matches(item, active)) grouped.get(item.course)!.push(item);
+      if (matches(item, active) && matchesQuery(item, query)) {
+        grouped.get(item.course)!.push(item);
+      }
     }
     return grouped;
-  }, [items, active]);
+  }, [items, active, query]);
 
   const shownCount = useMemo(
     () => Array.from(byCourse.values()).reduce((n, list) => n + list.length, 0),
     [byCourse],
   );
+
+  const filtering = active.size > 0 || query.trim().length > 0;
 
   return (
     <div>
@@ -79,10 +93,49 @@ export function MenuBrowser({ items }: { items: MenuItem[] }) {
             </a>
           ))}
         </nav>
+        <div className="mt-2">
+          <label htmlFor="menu-search" className="sr-only">
+            Search the menu
+          </label>
+          <div className="relative">
+            <svg
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-harbor-ink-soft"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+              <path
+                d="m20 20-3.5-3.5"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+            <input
+              id="menu-search"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search dishes, e.g. salmon, oysters, vegan"
+              className="w-full rounded-full border border-harbor-line bg-white py-2 pl-9 pr-9 text-sm outline-none focus:border-harbor-teal sm:max-w-md"
+            />
+            {query && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-harbor-ink-soft hover:text-harbor-teal"
+              >
+                &times;
+              </button>
+            )}
+          </div>
+        </div>
         <div
           role="group"
           aria-label="Dietary filters"
-          className="mt-1 flex flex-wrap items-center gap-2"
+          className="mt-2 flex flex-wrap items-center gap-2"
         >
           {FILTERS.map((f) => {
             const on = active.has(f.key);
@@ -102,7 +155,7 @@ export function MenuBrowser({ items }: { items: MenuItem[] }) {
               </button>
             );
           })}
-          {active.size > 0 && (
+          {filtering && (
             <span aria-live="polite" className="text-xs text-harbor-ink-soft">
               {shownCount} of {items.length} dishes
             </span>
@@ -110,8 +163,18 @@ export function MenuBrowser({ items }: { items: MenuItem[] }) {
         </div>
       </div>
 
+      {filtering && shownCount === 0 && (
+        <p className="py-16 text-center text-harbor-ink-soft">
+          No dishes match{query ? ` "${query}"` : " those filters"}. Try a
+          different search or clear the filters.
+        </p>
+      )}
+
       {COURSES.map((course) => {
         const list = byCourse.get(course)!;
+        // While filtering, drop empty courses so results stay tight; otherwise
+        // the global empty-state above covers a true no-match.
+        if (list.length === 0) return null;
         return (
           <section
             key={course}
@@ -120,12 +183,7 @@ export function MenuBrowser({ items }: { items: MenuItem[] }) {
             className="scroll-mt-36 py-8"
           >
             <h2 className="text-3xl">{COURSE_LABELS[course]}</h2>
-            {list.length === 0 ? (
-              <p className="mt-4 text-sm text-harbor-ink-soft">
-                Nothing in this course matches the current filters.
-              </p>
-            ) : (
-              <ul className="mt-6 grid gap-x-10 gap-y-6 md:grid-cols-2">
+            <ul className="mt-6 grid gap-x-10 gap-y-6 md:grid-cols-2">
                 {list.map((item) => (
                   <li key={item.slug}>
                     <Link
@@ -164,7 +222,6 @@ export function MenuBrowser({ items }: { items: MenuItem[] }) {
                   </li>
                 ))}
               </ul>
-            )}
           </section>
         );
       })}

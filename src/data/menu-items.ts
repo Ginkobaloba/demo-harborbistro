@@ -92,6 +92,195 @@ const BURGER_EXTRAS: CustomizationGroup = {
   ],
 };
 
+// Bun choice for burgers and sandwiches.
+const BUN_CHOICE: CustomizationGroup = {
+  id: "bun",
+  label: "Bun",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "potato", label: "Toasted Potato Bun" },
+    { id: "gluten-free", label: "Gluten-Free Bun", priceCents: 200 },
+    { id: "lettuce", label: "Lettuce Wrap" },
+  ],
+};
+
+// Optional sandwich add-ons (multi).
+const SANDWICH_ADDONS: CustomizationGroup = {
+  id: "addons",
+  label: "Add-ons",
+  type: "multi",
+  choices: [
+    { id: "bacon", label: "Smoked Bacon", priceCents: 300 },
+    { id: "cheddar", label: "Aged Cheddar", priceCents: 200 },
+    { id: "egg", label: "Fried Egg", priceCents: 200 },
+    { id: "avocado", label: "Avocado", priceCents: 250 },
+  ],
+};
+
+// Dipping sauces for fried snacks and frites (multi, first one's on the house).
+const DIPPING_SAUCES: CustomizationGroup = {
+  id: "dips",
+  label: "Dipping sauces",
+  type: "multi",
+  choices: [
+    { id: "malt-aioli", label: "Malt Vinegar Aioli" },
+    { id: "smoked-ketchup", label: "Smoked Ketchup" },
+    { id: "ramp-ranch", label: "Ramp Ranch", priceCents: 100 },
+    { id: "harbor-sauce", label: "Harbor Sauce", priceCents: 100 },
+  ],
+};
+
+// Kitchen spice level for items finished with chile or paprika.
+const SPICE_LEVEL: CustomizationGroup = {
+  id: "spice",
+  label: "Spice level",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "mild", label: "Mild" },
+    { id: "medium", label: "Medium" },
+    { id: "hot", label: "Hot" },
+  ],
+};
+
+// Half vs full dozen for raw bar.
+const OYSTER_SIZE: CustomizationGroup = {
+  id: "size",
+  label: "How many",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "half", label: "Half Dozen" },
+    { id: "dozen", label: "Full Dozen", priceCents: 1600 },
+  ],
+};
+
+// Starter vs entree portion for salads ("make it a meal").
+const SALAD_SIZE: CustomizationGroup = {
+  id: "portion",
+  label: "Portion",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "starter", label: "Starter" },
+    { id: "entree", label: "Entree (make it a meal)", priceCents: 500 },
+  ],
+};
+
+// Optional doneness for salmon (steak temp is its own group).
+const SALMON_TEMP: CustomizationGroup = {
+  id: "temp",
+  label: "Doneness",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "medium", label: "Medium" },
+    { id: "medium-well", label: "Medium Well" },
+    { id: "well", label: "Well Done" },
+  ],
+};
+
+// A la mode upsell for desserts.
+const A_LA_MODE: CustomizationGroup = {
+  id: "ala-mode",
+  label: "A la mode",
+  type: "single",
+  choices: [
+    { id: "none", label: "No thanks" },
+    { id: "vanilla", label: "Vanilla Bean Ice Cream", priceCents: 250 },
+    { id: "sorbet", label: "Seasonal Sorbet", priceCents: 250 },
+  ],
+};
+
+// Extra dunking sauces for dessert (multi).
+const DESSERT_SAUCES: CustomizationGroup = {
+  id: "sauces",
+  label: "Dunking sauces",
+  type: "multi",
+  choices: [
+    { id: "chocolate", label: "Dark Chocolate" },
+    { id: "caramel", label: "Bourbon Caramel" },
+    { id: "raspberry", label: "Raspberry Coulis", priceCents: 100 },
+  ],
+};
+
+// Drink size for house non-alcoholic pours.
+const DRINK_SIZE: CustomizationGroup = {
+  id: "drink-size",
+  label: "Size",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "regular", label: "Regular" },
+    { id: "large", label: "Large", priceCents: 150 },
+  ],
+};
+
+// Milk choice for coffee.
+const COFFEE_MILK: CustomizationGroup = {
+  id: "milk",
+  label: "Milk",
+  type: "single",
+  choices: [
+    { id: "none", label: "Black" },
+    { id: "whole", label: "Whole Milk" },
+    { id: "oat", label: "Oat Milk", priceCents: 75 },
+    { id: "almond", label: "Almond Milk", priceCents: 75 },
+  ],
+};
+
+// Strength for spirit-forward cocktails.
+const COCKTAIL_STRENGTH: CustomizationGroup = {
+  id: "strength",
+  label: "Pour",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "single", label: "Single" },
+    { id: "double", label: "Make it a Double", priceCents: 600 },
+  ],
+};
+
+// Rim choice for margarita-style drinks.
+const RIM_CHOICE: CustomizationGroup = {
+  id: "rim",
+  label: "Rim",
+  type: "single",
+  required: true,
+  choices: [
+    { id: "smoked-salt", label: "Smoked Salt" },
+    { id: "tajin", label: "Tajin" },
+    { id: "none", label: "No Rim" },
+  ],
+};
+
+// Optional loaded add-ons for sides (multi).
+const SIDE_ADDONS: CustomizationGroup = {
+  id: "loaded",
+  label: "Make it loaded",
+  type: "multi",
+  choices: [
+    { id: "bacon", label: "Smoked Bacon", priceCents: 300 },
+    { id: "egg", label: "Fried Egg", priceCents: 200 },
+    { id: "parmesan", label: "Shaved Parmesan", priceCents: 150 },
+    { id: "chile", label: "Chile Crisp", priceCents: 100 },
+  ],
+};
+
+// Add a protein to a vegetarian entree (optional).
+const ENTREE_ADD_PROTEIN: CustomizationGroup = {
+  id: "protein",
+  label: "Add a protein",
+  type: "single",
+  choices: [
+    { id: "none", label: "No thanks" },
+    { id: "chicken", label: "Grilled Chicken", priceCents: 800 },
+    { id: "shrimp", label: "Grilled Shrimp", priceCents: 1000 },
+    { id: "steak", label: "Sliced Hanger Steak", priceCents: 1200 },
+  ],
+};
+
 export const SEED_MENU: SeedMenuItem[] = [
   // ---------------------------------------------------------------- snacks
   {
@@ -114,6 +303,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 1700,
     photoUrl: unsplash("photo-1599487488170-d11ec9c172f0"),
     isGlutenFree: true,
+    customizationOptions: [SPICE_LEVEL],
   },
   {
     slug: "smoked-whitefish-dip",
@@ -132,6 +322,7 @@ export const SEED_MENU: SeedMenuItem[] = [
       "Cornmeal-crusted walleye, fried to order. Tartar sauce, charred lemon, shaved fennel.",
     priceCents: 1400,
     photoUrl: unsplash("photo-1579208030886-b937da0925dc"),
+    customizationOptions: [DIPPING_SAUCES],
   },
   {
     slug: "wood-fired-shishitos",
@@ -144,6 +335,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [DIPPING_SAUCES],
   },
   {
     slug: "duck-fat-frites",
@@ -153,6 +345,7 @@ export const SEED_MENU: SeedMenuItem[] = [
       "Twice-cooked frites finished in duck fat, rosemary salt, malt vinegar aioli.",
     priceCents: 900,
     photoUrl: unsplash("photo-1573080496219-bb080dd4f877"),
+    customizationOptions: [DIPPING_SAUCES],
   },
   {
     slug: "oysters-half-shell",
@@ -163,6 +356,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 1800,
     photoUrl: unsplash("photo-1572715376701-98568319fd0b"),
     isGlutenFree: true,
+    customizationOptions: [OYSTER_SIZE],
   },
   {
     slug: "bistro-bread-butter",
@@ -183,6 +377,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 1100,
     photoUrl: unsplash("photo-1531749668029-2db88e4276c7"),
     isVegetarian: true,
+    customizationOptions: [DIPPING_SAUCES],
   },
   {
     slug: "chilled-shrimp-cocktail",
@@ -203,7 +398,7 @@ export const SEED_MENU: SeedMenuItem[] = [
       "Little gem lettuce, white anchovy, sourdough crumb, grana padano. The dressing pulls no punches.",
     priceCents: 1300,
     photoUrl: unsplash("photo-1550304943-4f24f54ddde9"),
-    customizationOptions: [ADD_PROTEIN],
+    customizationOptions: [SALAD_SIZE, ADD_PROTEIN],
   },
   {
     slug: "harbor-greens",
@@ -216,7 +411,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
-    customizationOptions: [DRESSING, ADD_PROTEIN],
+    customizationOptions: [SALAD_SIZE, DRESSING, ADD_PROTEIN],
   },
   {
     slug: "roasted-beet-chevre",
@@ -229,6 +424,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegetarian: true,
     isGlutenFree: true,
     containsNuts: true,
+    customizationOptions: [SALAD_SIZE, ADD_PROTEIN],
   },
   {
     slug: "grilled-peach-burrata",
@@ -239,6 +435,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 1600,
     photoUrl: unsplash("photo-1573821663912-6df460f9c684"),
     isGlutenFree: true,
+    customizationOptions: [SALAD_SIZE, ADD_PROTEIN],
   },
   {
     slug: "charred-broccoli-salad",
@@ -251,7 +448,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegetarian: true,
     isGlutenFree: true,
     containsNuts: true,
-    customizationOptions: [ADD_PROTEIN],
+    customizationOptions: [SALAD_SIZE, ADD_PROTEIN],
   },
   {
     slug: "wedge-smoked-bacon",
@@ -262,6 +459,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 1300,
     photoUrl: unsplash("photo-1551248429-40975aa4de74"),
     isGlutenFree: true,
+    customizationOptions: [SALAD_SIZE, ADD_PROTEIN],
   },
   {
     slug: "watermelon-feta",
@@ -273,6 +471,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     photoUrl: unsplash("photo-1564093497595-593b96d80180"),
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [SALAD_SIZE],
   },
 
   // --------------------------------------------------------------- entrees
@@ -297,6 +496,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 2900,
     photoUrl: unsplash("photo-1535399831218-d5bd36d1a6b3"),
     isGlutenFree: true,
+    customizationOptions: [ENTREE_SIDE],
   },
   {
     slug: "grilled-hanger-steak",
@@ -329,6 +529,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 3000,
     photoUrl: unsplash("photo-1485921325833-c519f76c4927"),
     isGlutenFree: true,
+    customizationOptions: [SALMON_TEMP, ENTREE_SIDE],
   },
   {
     slug: "roast-half-chicken",
@@ -339,6 +540,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 2600,
     photoUrl: unsplash("photo-1598103442097-8b74394b95c6"),
     isGlutenFree: true,
+    customizationOptions: [ENTREE_SIDE],
   },
   {
     slug: "harbor-smash-burger",
@@ -348,7 +550,7 @@ export const SEED_MENU: SeedMenuItem[] = [
       "Two smashed patties, aged cheddar, shaved onion, pickles, harbor sauce, sea-salt frites.",
     priceCents: 1700,
     photoUrl: unsplash("photo-1568901346375-23c9450c58cd"),
-    customizationOptions: [BURGER_EXTRAS],
+    customizationOptions: [BUN_CHOICE, BURGER_EXTRAS],
   },
   {
     slug: "fried-chicken-sandwich",
@@ -358,6 +560,7 @@ export const SEED_MENU: SeedMenuItem[] = [
       "Buttermilk fried chicken, pickle slaw, hot honey, toasted potato bun, frites.",
     priceCents: 1600,
     photoUrl: unsplash("photo-1606755962773-d324e0a13086"),
+    customizationOptions: [BUN_CHOICE, SANDWICH_ADDONS],
   },
   {
     slug: "mushroom-cavatelli",
@@ -368,6 +571,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 2200,
     photoUrl: unsplash("photo-1473093295043-cdd812d0e601"),
     isVegetarian: true,
+    customizationOptions: [ENTREE_ADD_PROTEIN],
   },
   {
     slug: "squash-risotto",
@@ -379,6 +583,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     photoUrl: unsplash("photo-1476124369491-e7addf5db371"),
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [ENTREE_ADD_PROTEIN],
   },
   {
     slug: "drunken-mussels-frites",
@@ -388,6 +593,7 @@ export const SEED_MENU: SeedMenuItem[] = [
       "A kilo of mussels steamed in white wine, garlic, and butter. Frites and grilled bread for the broth.",
     priceCents: 2400,
     photoUrl: unsplash("photo-1572695157366-5e585ab2b69f"),
+    customizationOptions: [SPICE_LEVEL],
   },
   {
     slug: "charred-cauliflower-steak",
@@ -400,6 +606,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegetarian: true,
     isGlutenFree: true,
     containsNuts: true,
+    customizationOptions: [ENTREE_ADD_PROTEIN],
   },
 
   // ----------------------------------------------------------------- sides
@@ -412,6 +619,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     photoUrl: unsplash("photo-1518013431117-eb1465fa5752"),
     isVegan: true,
     isVegetarian: true,
+    customizationOptions: [DIPPING_SAUCES, SIDE_ADDONS],
   },
   {
     slug: "smashed-potatoes",
@@ -421,6 +629,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 800,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [SIDE_ADDONS],
   },
   {
     slug: "wild-rice-pilaf",
@@ -451,6 +660,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 900,
     photoUrl: unsplash("photo-1543339494-b4cd4f7ba686"),
     isVegetarian: true,
+    customizationOptions: [SIDE_ADDONS],
   },
   {
     slug: "charred-sweet-corn",
@@ -493,6 +703,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     photoUrl: unsplash("photo-1464305795204-6f5bbfc7fb81"),
     isVegetarian: true,
     isFeatured: true,
+    customizationOptions: [A_LA_MODE],
   },
   {
     slug: "dark-chocolate-torte",
@@ -505,6 +716,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegetarian: true,
     isGlutenFree: true,
     containsNuts: true,
+    customizationOptions: [A_LA_MODE],
   },
   {
     slug: "lemon-posset",
@@ -523,6 +735,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 1000,
     photoUrl: unsplash("photo-1488477181946-6428a0291777"),
     isVegetarian: true,
+    customizationOptions: [A_LA_MODE],
   },
   {
     slug: "seasonal-sorbet",
@@ -553,6 +766,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     priceCents: 900,
     photoUrl: unsplash("photo-1551024601-bec78aea704b"),
     isVegetarian: true,
+    customizationOptions: [DESSERT_SAUCES],
   },
 
   // ---------------------------------------------------------------- drinks
@@ -576,6 +790,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [DRINK_SIZE],
   },
   {
     slug: "basil-cucumber-soda",
@@ -586,6 +801,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [DRINK_SIZE],
   },
   {
     slug: "cold-brew-coffee",
@@ -597,6 +813,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [DRINK_SIZE, COFFEE_MILK],
   },
   {
     slug: "drip-coffee",
@@ -607,6 +824,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [COFFEE_MILK],
   },
   {
     slug: "ginger-beer",
@@ -627,6 +845,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [DRINK_SIZE],
   },
   {
     slug: "arnold-palmer",
@@ -637,6 +856,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [DRINK_SIZE],
   },
 
   // ------------------------------------------------------------- cocktails
@@ -651,6 +871,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [COCKTAIL_STRENGTH],
   },
   {
     slug: "lighthouse-gimlet",
@@ -661,6 +882,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [COCKTAIL_STRENGTH],
   },
   {
     slug: "pier-spritz",
@@ -683,6 +905,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [COCKTAIL_STRENGTH, RIM_CHOICE],
   },
   {
     slug: "night-watch",
@@ -694,6 +917,7 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [COCKTAIL_STRENGTH],
   },
   {
     slug: "juniper-and-tonic",
@@ -726,5 +950,6 @@ export const SEED_MENU: SeedMenuItem[] = [
     isVegan: true,
     isVegetarian: true,
     isGlutenFree: true,
+    customizationOptions: [RIM_CHOICE, DRINK_SIZE],
   },
 ];

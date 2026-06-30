@@ -300,3 +300,133 @@ export function markOrderCancelled(orderId: string): Order | null {
     .run(orderId);
   return getOrder(orderId);
 }
+
+// ----------------------------------------------------------- kitchen / operator
+
+/**
+ * Statuses a paid order moves through in the kitchen, in order. `pending`
+ * (pre-payment) and the terminal `cancelled` are deliberately outside this
+ * line: the operator only ever drives a *paid* order forward.
+ */
+export const ORDER_FLOW = [
+  "received",
+  "preparing",
+  "ready",
+  "completed",
+] as const;
+
+export type ActiveOrderStatus = "received" | "preparing" | "ready";
+
+/** The live kitchen queue: paid orders not yet completed or cancelled. */
+export const ACTIVE_ORDER_STATUSES: ActiveOrderStatus[] = [
+  "received",
+  "preparing",
+  "ready",
+];
+
+/**
+ * The next status in the kitchen flow, or null if the order is terminal
+ * (completed/cancelled) or still awaiting payment. Pure: drives both the
+ * operator "advance" button and its server-side validation.
+ */
+export function nextOrderStatus(current: OrderStatus): OrderStatus | null {
+  const idx = (ORDER_FLOW as readonly string[]).indexOf(current);
+  if (idx === -1 || idx === ORDER_FLOW.length - 1) return null;
+  return ORDER_FLOW[idx + 1];
+}
+
+/** Raised when an operator action is not legal for the order's current state. */
+export class OrderTransitionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrderTransitionError";
+  }
+}
+
+/**
+ * Advance a paid order to the next kitchen status (received -> preparing ->
+ * ready -> completed). Throws OrderTransitionError if the order is unknown,
+ * unpaid, or already terminal. The status guard in the WHERE clause makes the
+ * write idempotent under concurrent operator clicks.
+ */
+export function advanceOrder(orderId: string): Order {
+  const order = getOrder(orderId);
+  if (!order) throw new OrderTransitionError(`Unknown order ${orderId}`);
+  const next = nextOrderStatus(order.status);
+  if (!next) {
+    throw new OrderTransitionError(
+      `Order ${orderId} cannot advance from "${order.status}"`,
+    );
+  }
+  getDb()
+    .prepare(
+      `UPDATE orders SET status = ?, updated_at = datetime('now')
+       WHERE id = ? AND status = ?`,
+    )
+    .run(next, orderId, order.status);
+  return getOrder(orderId)!;
+}
+
+/**
+ * Cancel a paid order that has not yet completed. Distinct from
+ * markOrderCancelled (which only touches still-`pending` checkouts): this is
+ * the operator cancelling an in-progress kitchen order.
+ */
+export function cancelActiveOrder(orderId: string): Order {
+  const order = getOrder(orderId);
+  if (!order) throw new OrderTransitionError(`Unknown order ${orderId}`);
+  if (!ACTIVE_ORDER_STATUSES.includes(order.status as ActiveOrderStatus)) {
+    throw new OrderTransitionError(
+      `Order ${orderId} cannot be cancelled from "${order.status}"`,
+    );
+  }
+  getDb()
+    .prepare(
+      "UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?",
+    )
+    .run(orderId);
+  return getOrder(orderId)!;
+}
+
+/** Live kitchen queue, oldest first (the order a cook should start next). */
+export function getActiveOrders(): Order[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM orders
+       WHERE status IN ('received','preparing','ready')
+       ORDER BY created_at ASC`,
+    )
+    .all() as OrderRow[];
+  return rows.map(rowToOrder);
+}
+
+/** Recently finished orders (completed or cancelled), newest first. */
+export function getRecentOrders(limit = 25): Order[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM orders
+       WHERE status IN ('completed','cancelled')
+       ORDER BY updated_at DESC
+       LIMIT ?`,
+    )
+    .all(limit) as OrderRow[];
+  return rows.map(rowToOrder);
+}
+
+/** Counts per active status for the operator header, e.g. {received: 3, ...}. */
+export function getKitchenCounts(): Record<ActiveOrderStatus, number> {
+  const rows = getDb()
+    .prepare(
+      `SELECT status, COUNT(*) c FROM orders
+       WHERE status IN ('received','preparing','ready')
+       GROUP BY status`,
+    )
+    .all() as { status: ActiveOrderStatus; c: number }[];
+  const counts: Record<ActiveOrderStatus, number> = {
+    received: 0,
+    preparing: 0,
+    ready: 0,
+  };
+  for (const r of rows) counts[r.status] = r.c;
+  return counts;
+}

@@ -5,6 +5,7 @@ import { formatPrice } from "@/lib/menu-format";
 import { ORDER_STATUS_LABELS } from "@/lib/types";
 import { getOrder, lineDescription, markOrderPaid } from "@/lib/orders";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { OrderTracker } from "@/components/order/OrderTracker";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,23 @@ export default async function OrderConfirmationPage({
               : "We are getting it ready for pickup."
             : "We could not confirm payment for this order. You were not charged."}
         </p>
+
+        {paid && (
+          <div className="mt-8">
+            <OrderTracker
+              orderId={order.id}
+              initialStatus={order.status}
+              fulfillment={order.fulfillment}
+            />
+            <p className="mt-3 text-center text-xs text-harbor-ink-soft">
+              Bookmark this page to follow your order, or keep your code{" "}
+              <span className="font-mono font-medium text-harbor-teal">
+                {order.id}
+              </span>
+              .
+            </p>
+          </div>
+        )}
 
         <div className="mt-8 rounded-2xl bg-harbor-cream-deep p-6 shadow-warm">
           <div className="mb-5 text-center">

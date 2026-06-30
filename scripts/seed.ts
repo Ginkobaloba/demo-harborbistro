@@ -79,16 +79,22 @@ function lineItemsFor(seedIndex: number): OrderLineItem[] {
   for (let j = 0; j < count; j++) {
     const item = pick(ORDERABLE, seedIndex * 7 + j * 13 + 3);
     const selections: Record<string, string | string[]> = {};
+    // Answer required (and other single-choice) groups, folding any upcharge
+    // into the unit price so seeded order totals match what the customizer
+    // would have produced.
+    let unitPriceCents = item.priceCents;
     for (const group of item.customizationOptions ?? []) {
       if (group.type === "single") {
-        selections[group.id] = pick(group.choices, seedIndex + j).id;
+        const choice = pick(group.choices, seedIndex + j);
+        selections[group.id] = choice.id;
+        unitPriceCents += choice.priceCents ?? 0;
       }
     }
     items.push({
       slug: item.slug,
       name: item.name,
       quantity: 1 + ((seedIndex + j) % 2),
-      unitPriceCents: item.priceCents,
+      unitPriceCents,
       selections,
     });
   }
@@ -170,6 +176,14 @@ const insertReservation = db.prepare(`
 `);
 
 const TIMES = ["17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30"];
+
+/** Local YYYY-MM-DD (matches how the operator views and form read dates). */
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 const NOTES = [
   null,
   "Anniversary -- window table if possible",
@@ -181,9 +195,19 @@ const NOTES = [
   "Quiet corner preferred",
 ];
 
+// Statuses for tonight's book so the operator board opens mid-service:
+// a couple already seated, the rest still confirmed and arriving.
+const TODAY_STATUSES = ["seated", "seated", "confirmed", "confirmed", "confirmed"];
+const TODAY_COUNT = TODAY_STATUSES.length;
+
 db.transaction(() => {
   for (let i = 0; i < 15; i++) {
-    const daysOut = 1 + Math.floor((i / 15) * 14); // spread across next 2 weeks
+    // First few land on today so "Tonight" has a working set; the rest spread
+    // across the next two weeks (D-003).
+    const onToday = i < TODAY_COUNT;
+    const daysOut = onToday
+      ? 0
+      : 1 + Math.floor(((i - TODAY_COUNT) / (15 - TODAY_COUNT)) * 13);
     const date = new Date(Date.now() + daysOut * 24 * 60 * 60_000);
     const name = `${pick(FIRST_NAMES, i + 7)} ${pick(LAST_NAMES, i + 3)}`;
     insertReservation.run({
@@ -192,10 +216,10 @@ db.transaction(() => {
       phone: `555-02${String(10 + i)}`,
       email: `${name.toLowerCase().replace(/[^a-z]+/g, ".")}@example.com`,
       partySize: 2 + (i % 7),
-      reservedDate: date.toISOString().slice(0, 10),
+      reservedDate: localDateStr(date),
       reservedTime: pick(TIMES, i * 3),
       notes: pick(NOTES, i),
-      status: "confirmed",
+      status: onToday ? TODAY_STATUSES[i] : "confirmed",
       createdAt: new Date(Date.now() - i * 5 * 60 * 60_000).toISOString(),
     });
   }
