@@ -107,6 +107,81 @@ export function getAllReservations(): Reservation[] {
   return rows.map(rowToReservation);
 }
 
+/** Today's bookings (local date), in service order. */
+export function getReservationsForDate(dateStr: string): Reservation[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT * FROM reservations WHERE reserved_date = ? ORDER BY reserved_time, created_at"
+    )
+    .all(dateStr) as Record<string, unknown>[];
+  return rows.map(rowToReservation);
+}
+
+// ------------------------------------------------------- operator transitions
+
+/**
+ * Legal next states for the host stand. A booking is confirmed, then seated
+ * when the party arrives, then completed when they leave. Cancel is allowed
+ * any time before completion. completed/cancelled are terminal.
+ */
+const RESERVATION_TRANSITIONS: Record<
+  Reservation["status"],
+  Reservation["status"][]
+> = {
+  confirmed: ["seated", "cancelled"],
+  seated: ["completed", "cancelled"],
+  completed: [],
+  cancelled: [],
+};
+
+export class ReservationTransitionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReservationTransitionError";
+  }
+}
+
+export function canTransitionReservation(
+  from: Reservation["status"],
+  to: Reservation["status"],
+): boolean {
+  return RESERVATION_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/**
+ * Move a reservation to a new status, enforcing the host-stand flow. Throws
+ * ReservationTransitionError on an unknown id or an illegal transition.
+ */
+export function setReservationStatus(
+  id: string,
+  to: Reservation["status"],
+): Reservation {
+  const current = getReservation(id);
+  if (!current) {
+    throw new ReservationTransitionError(`Unknown reservation ${id}`);
+  }
+  if (current.status === to) return current;
+  if (!canTransitionReservation(current.status, to)) {
+    throw new ReservationTransitionError(
+      `Reservation ${id} cannot move from "${current.status}" to "${to}"`,
+    );
+  }
+  getDb()
+    .prepare("UPDATE reservations SET status = ? WHERE id = ?")
+    .run(to, id);
+  return getReservation(id)!;
+}
+
+/** Today as a local YYYY-MM-DD string (matches how reserved_date is stored). */
+export function todayLocalDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 /** "16:00" -> "4:00 PM" */
 export function formatTime(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
