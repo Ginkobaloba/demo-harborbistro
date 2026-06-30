@@ -1,0 +1,69 @@
+# smoke.yml -- fast surface checks run on every PR
+#
+# Supported assertion types:
+#   http_status       -- checks HTTP response code matches `expect`
+#   text_present      -- checks that `text` appears in the response body
+#   selector_present  -- checks that a CSS selector matches at least one element
+#   header_present    -- checks that the named response header exists
+#   redirects_to      -- checks that the URL redirects to `expect` (final URL)
+#   json_path_equals  -- checks that a JSONPath expression equals `expect`
+
+target: demo-harborbistro
+deploy_url: https://harborbistro.projectnexuscode.org
+
+surfaces:
+  - name: home
+    url: /
+    assertions:
+      - { type: http_status, expect: 200 }
+      - { type: text_present, text: "Dinner by the water, minus the production" }
+      - { type: text_present, text: "Harbor Bistro" }
+      - { type: text_present, text: "Coastal-inspired, locally sourced" }
+      - { type: selector_present, selector: "main" }
+      - { type: selector_present, selector: "a[href='/reserve']" }
+      - { type: selector_present, selector: "a[href='/menu']" }
+      - { type: header_present, header: "Strict-Transport-Security" }
+
+  - name: menu
+    url: /menu
+    assertions:
+      - { type: http_status, expect: 200 }
+      - { type: text_present, text: "The Menu" }
+      - { type: text_present, text: "cooked to order" }
+      - { type: selector_present, selector: "main" }
+      - { type: header_present, header: "Strict-Transport-Security" }
+
+  - name: reservations
+    url: /reservations
+    assertions:
+      - { type: http_status, expect: 200 }
+      - { type: text_present, text: "Reserve a Table" }
+      - { type: text_present, text: "Tables for 1 to 12" }
+      - { type: selector_present, selector: "form" }
+      - { type: selector_present, selector: "input#date" }
+      - { type: selector_present, selector: "select#partySize" }
+      - { type: selector_present, selector: "input#name" }
+      - { type: selector_present, selector: "input#phone" }
+      - { type: header_present, header: "Strict-Transport-Security" }
+
+  - name: order
+    url: /order
+    assertions:
+      - { type: http_status, expect: 200 }
+      - { type: text_present, text: "cart" }
+      - { type: selector_present, selector: "main" }
+      - { type: header_present, header: "Strict-Transport-Security" }
+
+  - name: about
+    url: /about
+    assertions:
+      - { type: http_status, expect: 200 }
+      - { type: text_present, text: "Harbor Bistro" }
+      - { type: selector_present, selector: "main" }
+      - { type: header_present, header: "Strict-Transport-Security" }
+
+  - name: reservations-api-slots
+    url: /api/reservations?date=2026-07-04
+    assertions:
+      - { type: http_status, expect: 200 }
+      - { type: json_path_equals, path: "$.slots", expect_type: "array" }
