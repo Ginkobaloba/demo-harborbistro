@@ -154,3 +154,54 @@ signed-in session. Decisions:
   this chunk (admin/reservations is open in dev). Federation adds the
   signed-in path; a follow-on chunk will gate admin and post-checkout
   surfaces behind readHarborSession.
+
+## D-012: Live order tracking + operator console (must-have, 2026-06-29)
+
+Closing the "must-have" gap analysis. The order status set
+(received/preparing/ready/completed) and the orders table already existed
+from D-010; this chunk made them drivable and visible.
+
+- **Confirmation page is the tracker.** Rather than a separate /order/track
+  route, the existing /order/confirmation/[id] now embeds a client
+  `OrderTracker` that seeds from the server-rendered status and polls
+  `GET /api/orders/[id]` every 5s until terminal. The order code is the
+  bearer token (random, unguessable), so the status endpoint returns status
+  + fulfillment only, never PII. Stops polling on completed/cancelled.
+- **Operator console at /admin (open, demo-only).** `/admin/orders` is a
+  three-column kitchen display (Received | Preparing | Ready) plus a recent
+  table; `/admin/reservations` gained a "Tonight" working set and the full
+  book. Both auto-refresh via a small `AutoRefresh` client component
+  (router.refresh on an interval + on focus). Kept open like the prior admin
+  surface (D-011); gating waits on the federation follow-on.
+- **Transitions live in the lib, enforced server-side.** `advanceOrder`,
+  `cancelActiveOrder` (orders.ts) and `setReservationStatus` (reservations.ts)
+  validate legal moves and are idempotent under double-click via a status
+  guard in the WHERE clause. Routes are thin: POST /api/admin/orders/[id]
+  {advance|cancel} and POST /api/admin/reservations/[id] {status}. Illegal
+  moves return 409. Covered by 14 new unit tests against a temp DB.
+- **Seed now opens mid-service.** 5 reservations land on today (2 seated, 3
+  confirmed) so the operator's "Tonight" view is non-empty, and seed order
+  unit prices fold in single-choice upcharges so operator totals are honest.
+  verify-seed's reservation-window check relaxed to include today.
+
+## D-013: Modifier groups across every category (must-have, 2026-06-29)
+
+The customizer (radios for required single-choice, checkboxes for multi)
+already existed; only a handful of items carried options. Expanded to 43 of
+60 items, touching all 7 courses, via reusable groups in menu-items.ts:
+bun choice + sandwich add-ons, dipping sauces, spice level, oyster size,
+salad portion ("make it a meal"), salmon doneness, a-la-mode, drink size,
+coffee milk, cocktail strength, rim choice, loaded-side add-ons. Required
+radios appear on steaks/salmon/salads/drinks/oysters/cocktails; multi
+checkboxes on snacks/burgers/sides/desserts. Server-side priceCart() already
+validates and reprices these, so no client trust was added. Photos, prices,
+and dietary flags were left byte-identical.
+
+## D-014: Move portal-handoff helper out of route.ts (build fix, 2026-06-29)
+
+`next build` failed on main (a known pre-existing breaker): route files may
+only export HTTP handlers + a small allow-list, but route.ts also exported
+`handlePortalHandoff`/`HandoffDeps` for tests. Moved both into a sibling
+`handler.ts`; route.ts now imports and exposes only `POST`. Test imports
+updated to `./handler`. Behaviour unchanged; the demo builds and is
+deployable again.
