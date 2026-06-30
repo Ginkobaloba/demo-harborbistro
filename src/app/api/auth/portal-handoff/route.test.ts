@@ -6,7 +6,7 @@ import {
   createLocalJWKSet,
   type JWK,
 } from "jose";
-import { handlePortalHandoff } from "./route";
+import { handlePortalHandoff } from "./handler";
 import { verifyHarborSession, harborSessionCookieName } from "@/lib/portal-session";
 
 const ISS = "https://portal.test.local";
