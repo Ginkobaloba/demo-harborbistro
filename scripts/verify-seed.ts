@@ -104,13 +104,18 @@ check("15 reservations", resCount === 15, `got ${resCount}`);
 const resWindow = db
   .prepare("SELECT MIN(reserved_date) lo, MAX(reserved_date) hi FROM reservations")
   .get() as { lo: string; hi: string };
-const today = new Date().toISOString().slice(0, 10);
+const localToday = (() => {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+})();
 const twoWeeks = new Date(Date.now() + 15 * 24 * 60 * 60_000)
   .toISOString()
   .slice(0, 10);
 check(
-  "reservations within the next 2 weeks",
-  resWindow.lo > today && resWindow.hi <= twoWeeks,
+  "reservations from today through the next 2 weeks",
+  resWindow.lo >= localToday && resWindow.hi <= twoWeeks,
   `${resWindow.lo}..${resWindow.hi}`,
 );
 
