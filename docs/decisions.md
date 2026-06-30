@@ -172,7 +172,9 @@ from D-010; this chunk made them drivable and visible.
   table; `/admin/reservations` gained a "Tonight" working set and the full
   book. Both auto-refresh via a small `AutoRefresh` client component
   (router.refresh on an interval + on focus). Kept open like the prior admin
-  surface (D-011); gating waits on the federation follow-on.
+  surface (D-011). **Drew confirmed 2026-06-30: leave /admin open for now;
+  decide when to gate later.** The federation follow-on can wire
+  `readHarborSession` whenever that call is made.
 - **Transitions live in the lib, enforced server-side.** `advanceOrder`,
   `cancelActiveOrder` (orders.ts) and `setReservationStatus` (reservations.ts)
   validate legal moves and are idempotent under double-click via a status

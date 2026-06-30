@@ -70,8 +70,8 @@ done, verified end-to-end, build green.
 
 ## Open questions for Drew
 
-- **Operator auth:** keep `/admin` open for the demo (current), or gate it
-  behind the portal `hb_session` now? Left open to match D-011.
+- **Operator auth:** RESOLVED 2026-06-30 -- Drew said keep `/admin` open for
+  now, decide when to gate later. No action needed this cycle.
 - **Alcohol ordering:** cocktails are orderable online with modifiers (to
   satisfy "touch every category"). Fine for a demo; flag if you want them
   display-only.
