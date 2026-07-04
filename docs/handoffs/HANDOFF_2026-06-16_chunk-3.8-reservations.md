@@ -51,7 +51,7 @@
 
 ## What is currently broken or incomplete
 
-- **Cloudflare 502 from DREWSPC.** After the nginx fix, external health checks
+- **Cloudflare 502 from <HOST>.** After the nginx fix, external health checks
   (65.28.177.89) reach nginx through the tunnel just fine. But requests to
   `https://harborbistro.projectnexuscode.org` from this machine still return
   502. Most likely a local routing quirk with how Cloudflare sends traffic back
@@ -81,7 +81,7 @@
 
 ## What the next session should do first
 
-1. **Verify from a non-DREWSPC device** (phone, another machine, external curl)
+1. **Verify from a non-<HOST> device** (phone, another machine, external curl)
    that `https://harborbistro.projectnexuscode.org/reservations` returns 200.
    If it does, the 502 was only a local-machine tunnel routing artifact.
 
@@ -99,7 +99,7 @@
 
 ## Open questions for Drew
 
-- **Cloudflare 502 local routing:** is this machine (DREWSPC) expected to
+- **Cloudflare 502 local routing:** is this machine (<HOST>) expected to
   access `*.projectnexuscode.org` through the Cloudflare tunnel, or should
   local requests go direct? If the tunnel setup routes outbound traffic from
   this host differently, that would explain the persistent 502 from here while
