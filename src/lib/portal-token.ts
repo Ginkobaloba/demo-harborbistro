@@ -1,102 +1,44 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
+import type { JWTVerifyGetKey } from "jose";
+import {
+  verifyPortalToken as verifyWithBespoke,
+  readPortalTokenConfig,
+  _resetJwksCacheForTests as resetBespokeCache,
+  type PortalTokenConfig,
+  type VerifiedPortalToken,
+} from "./portal-token-bespoke";
+import {
+  verifySharedPortalToken,
+  _resetSharedJwksCacheForTests,
+} from "./portal-token-shared";
 
 /**
- * Portal token verification (chunk 4b).
+ * Portal token verification -- dispatch layer (CA5 cutover).
  *
- * The Paradigm Portal mints short-lived RS256 JWTs for users launching
- * Harbor Bistro. We verify them locally against the portal's JWKS per
- * docs/PORTAL_GATE_CONTRACT.md in portal-shell.
+ * The default engine is the shared @paradigm-codes/auth client library (K4),
+ * the same verifier every Paradigm consumer standardizes on. The pre-CA5
+ * bespoke engine is preserved verbatim in ./portal-token-bespoke.ts as a
+ * rollback path for one release:
  *
- * Cache strategy:
- *  - createRemoteJWKSet caches the JWKS internally for `cacheMaxAge`.
- *  - On a `kid` miss (rotation grace), jose refetches once per
- *    `cooldownDuration` and retries verification.
- *  - We default to 1h cache / 30s cooldown so a key rotation lands
- *    within a minute of publish without hammering the portal.
+ *   PORTAL_VERIFIER=bespoke    # flips back without a code change or deploy
+ *
+ * The public API (types, env parsing, null-on-failure contract, test seams)
+ * is unchanged from the bespoke module; callers and tests are agnostic to
+ * which engine ran. Remove the flag and the bespoke module together once the
+ * shared engine has survived a release in production.
  */
 
-export type PortalRole = "customer" | "staff" | "internal";
-
-export interface PortalTokenPayload extends JWTPayload {
-  iss: string;
-  aud: string;
-  sub: string;
-  iat: number;
-  exp: number;
-  customer_id?: string | null;
-  role?: PortalRole;
-}
-
-export interface VerifiedPortalToken {
-  payload: PortalTokenPayload;
-  kid: string;
-}
-
-export interface PortalTokenConfig {
-  jwksUrl: string;
-  expectedIssuer: string;
-  expectedAudience: string;
-}
+export { readPortalTokenConfig, getJwks } from "./portal-token-bespoke";
+export type {
+  PortalRole,
+  PortalTokenPayload,
+  VerifiedPortalToken,
+  PortalTokenConfig,
+} from "./portal-token-bespoke";
 
 /**
- * Read config from env. Throws if any required value is missing.
- * Centralizing the read here means tests can stub env without touching
- * the consumers.
- */
-export function readPortalTokenConfig(): PortalTokenConfig {
-  const jwksUrl = process.env.PORTAL_JWKS_URL;
-  const expectedIssuer = process.env.PORTAL_EXPECTED_ISSUER;
-  const expectedAudience = process.env.PORTAL_EXPECTED_AUD ?? "harborbistro";
-
-  if (!jwksUrl) {
-    throw new Error("PORTAL_JWKS_URL is not configured");
-  }
-  if (!expectedIssuer) {
-    throw new Error("PORTAL_EXPECTED_ISSUER is not configured");
-  }
-  return { jwksUrl, expectedIssuer, expectedAudience };
-}
-
-// Module-level memoization. The JWKS object itself is reusable across
-// requests in a single Node process and holds its own internal cache.
-let cachedKeyFn: JWTVerifyGetKey | null = null;
-let cachedKeyFnFor: string | null = null;
-
-/**
- * Build (or return cached) JWKS resolver for a given URL.
- * Exposed for tests so they can inject a fake.
- */
-export function getJwks(jwksUrl: string): JWTVerifyGetKey {
-  if (cachedKeyFn && cachedKeyFnFor === jwksUrl) {
-    return cachedKeyFn;
-  }
-  cachedKeyFn = createRemoteJWKSet(new URL(jwksUrl), {
-    cacheMaxAge: 60 * 60 * 1000, // 1 hour, matches portal Cache-Control
-    cooldownDuration: 30 * 1000, // 30s between forced refetches on kid miss
-  });
-  cachedKeyFnFor = jwksUrl;
-  return cachedKeyFn;
-}
-
-/**
- * Test-only escape hatch: drop the cached resolver so a different URL or
- * a freshly stubbed createRemoteJWKSet kicks in on the next call.
- */
-export function _resetJwksCacheForTests(): void {
-  cachedKeyFn = null;
-  cachedKeyFnFor = null;
-}
-
-/**
- * Verify a Portal-minted JWT.
- *
- * Returns null on any failure (bad signature, wrong issuer, wrong audience,
- * expired, malformed). Callers respond with 401 and a generic message --
- * the contract is intentionally vague to avoid handing attackers a debug
- * channel.
- *
- * The optional `keyResolver` argument lets tests inject a local JWKS
- * without monkey-patching the network fetch.
+ * Verify a Portal-minted JWT. Returns null on any failure, never throws.
+ * Engine selection is per call, so flipping the rollback flag needs no
+ * process restart.
  */
 export async function verifyPortalToken(
   token: string,
@@ -104,24 +46,14 @@ export async function verifyPortalToken(
   keyResolver?: JWTVerifyGetKey,
 ): Promise<VerifiedPortalToken | null> {
   if (!token || typeof token !== "string") return null;
-
-  const resolver = keyResolver ?? getJwks(config.jwksUrl);
-
-  try {
-    const { payload, protectedHeader } = await jwtVerify(token, resolver, {
-      issuer: config.expectedIssuer,
-      audience: config.expectedAudience,
-      algorithms: ["RS256"],
-    });
-
-    const sub = typeof payload.sub === "string" ? payload.sub.trim() : "";
-    if (!sub) return null;
-
-    return {
-      payload: payload as PortalTokenPayload,
-      kid: typeof protectedHeader.kid === "string" ? protectedHeader.kid : "",
-    };
-  } catch {
-    return null;
+  if (process.env.PORTAL_VERIFIER === "bespoke") {
+    return verifyWithBespoke(token, config, keyResolver);
   }
+  return verifySharedPortalToken(token, config, keyResolver);
+}
+
+/** Test helper: reset both engines' JWKS caches between cases. */
+export function _resetJwksCacheForTests(): void {
+  resetBespokeCache();
+  _resetSharedJwksCacheForTests();
 }
