@@ -19,10 +19,8 @@ export const runtime = "nodejs";
  * Demo note: no auth gate yet, consistent with the open /admin surfaces
  * (decisions D-011). A later chunk gates /admin behind the portal session.
  */
-export async function POST(
-  req: Request,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let body: { action?: string };
   try {
     body = (await req.json()) as { action?: string };

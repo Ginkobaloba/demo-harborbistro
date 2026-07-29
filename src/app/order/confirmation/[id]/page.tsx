@@ -14,14 +14,13 @@ export const metadata: Metadata = {
 };
 
 type Props = {
-  params: { id: string };
-  searchParams: { session_id?: string };
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ session_id?: string }>;
 };
 
-export default async function OrderConfirmationPage({
-  params,
-  searchParams,
-}: Props) {
+export default async function OrderConfirmationPage(props: Props) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   let order = getOrder(params.id);
   if (!order) notFound();
 

@@ -100,7 +100,7 @@ export function harborSessionCookieAttributes(expiresAt: Date) {
  * cookie is set or the token does not verify.
  */
 export async function readHarborSession(): Promise<HarborSessionPayload | null> {
-  const jar = cookies();
+  const jar = await cookies();
   const raw = jar.get(COOKIE_NAME)?.value;
   if (!raw) return null;
   return verifyHarborSession(raw);

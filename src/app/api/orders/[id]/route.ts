@@ -13,10 +13,8 @@ export const runtime = "nodejs";
  * timestamps -- never customer PII. The order code itself is the (random,
  * unguessable) bearer token, the same posture as the confirmation URL.
  */
-export function GET(
-  _req: Request,
-  { params }: { params: { id: string } },
-) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const order = getOrder(params.id);
   if (!order) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
