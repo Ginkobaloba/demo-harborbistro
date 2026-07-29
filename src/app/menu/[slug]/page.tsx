@@ -18,9 +18,10 @@ export function generateStaticParams() {
   return getAllSlugs().map((slug) => ({ slug }));
 }
 
-type Props = { params: { slug: string } };
+type Props = { params: Promise<{ slug: string }> };
 
-export function generateMetadata({ params }: Props): Metadata {
+export async function generateMetadata(props: Props): Promise<Metadata> {
+  const params = await props.params;
   const item = getItemBySlug(params.slug);
   if (!item) return {};
   return {
@@ -29,7 +30,8 @@ export function generateMetadata({ params }: Props): Metadata {
   };
 }
 
-export default function MenuItemPage({ params }: Props) {
+export default async function MenuItemPage(props: Props) {
+  const params = await props.params;
   const item = getItemBySlug(params.slug);
   if (!item) notFound();
 

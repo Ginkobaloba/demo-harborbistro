@@ -10,9 +10,10 @@ export const metadata: Metadata = {
   title: "Reservation Confirmed",
 };
 
-type Props = { params: { id: string } };
+type Props = { params: Promise<{ id: string }> };
 
-export default function ConfirmationPage({ params }: Props) {
+export default async function ConfirmationPage(props: Props) {
+  const params = await props.params;
   const reservation = getReservation(params.id);
   if (!reservation) notFound();
 

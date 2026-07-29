@@ -18,10 +18,8 @@ const ALLOWED: ReservationStatus[] = ["seated", "completed", "cancelled"];
  *
  * Demo note: open like the rest of /admin (decisions D-011).
  */
-export async function POST(
-  req: Request,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let body: { status?: string };
   try {
     body = (await req.json()) as { status?: string };
