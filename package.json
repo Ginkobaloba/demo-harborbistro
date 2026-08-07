@@ -17,10 +17,10 @@
     "@paradigm-codes/auth": "^0.1.0",
     "better-sqlite3": "^12.10.0",
     "jose": "^6.2.3",
-    "next": "15.5.18",
+    "next": "16.3.0",
     "react": "^18",
     "react-dom": "^18",
-    "sharp": "^0.35.0",
+    "sharp": "^0.35.1",
     "stripe": "^22.2.1"
   },
   "devDependencies": {
