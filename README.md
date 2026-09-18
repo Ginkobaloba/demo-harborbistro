@@ -24,6 +24,37 @@ npm run db:seed   # create + seed the local SQLite database
 npm run dev
 ```
 
+## Environment
+
+Copy `.env.example` for local work. Runtime-only (never needed by `next build`):
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `STRIPE_SECRET_KEY` | for checkout | Stripe **test** key (`sk_test_...`). Checkout returns 503 without it. |
+| `STRIPE_WEBHOOK_SECRET` | for the webhook | Signing secret (`whsec_...`) for `/api/webhooks/stripe`. Without it the webhook **fails closed** (503, no event is processed). |
+| `PUBLIC_BASE_URL` | optional | Override for the public origin used in Stripe success/cancel URLs. |
+| `SESSION_SECRET`, `PORTAL_*` | for portal sign-in | See `.env.example`. |
+
+### Stripe webhook
+
+The webhook only acts on events whose `Stripe-Signature` verifies against
+`STRIPE_WEBHOOK_SECRET`; unsigned or forged requests are rejected (400), and
+with no secret configured every request gets 503. Handling is idempotent
+(transitions only apply to `pending` orders), so Stripe retries and replays
+are harmless. Orders also reconcile on the confirmation page via
+`checkout.sessions.retrieve`, so the site works while the webhook is off.
+
+To enable it for the deployed demo (Stripe **test mode**):
+
+1. Stripe Dashboard (test mode) > Developers > Webhooks > Add endpoint:
+   `https://harborbistro.projectnexuscode.org/api/webhooks/stripe`
+2. Select events `checkout.session.completed` and `checkout.session.expired`.
+3. Reveal the endpoint's signing secret and put it in the deploy env file as
+   `STRIPE_WEBHOOK_SECRET=whsec_...`, then redeploy the container.
+
+Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`
+prints a `whsec_` to use as `STRIPE_WEBHOOK_SECRET`.
+
 ## Pages
 
 `/` home, `/menu` (+ `/menu/[slug]`), `/order` cart + checkout,

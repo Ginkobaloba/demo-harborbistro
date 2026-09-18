@@ -119,6 +119,8 @@ Stripe test-mode payments. Decisions:
   read lazily at request time so `next build` needs no key; checkout degrades
   to a clear 503 when unconfigured. The deploy must inject these env vars into
   the container (deploy-demo.ps1 does not pass env yet -- tracked separately).
+  Superseded in part by D-015: the webhook no longer "works" without its
+  secret; it fails closed.
 
 ## D-011: Chunk 4b federates auth to the Paradigm Portal via JWKS (2026-06-19)
 
@@ -207,3 +209,24 @@ only export HTTP handlers + a small allow-list, but route.ts also exported
 `handler.ts`; route.ts now imports and exposes only `POST`. Test imports
 updated to `./handler`. Behaviour unchanged; the demo builds and is
 deployable again.
+
+## D-015: Stripe webhook fails closed without its signing secret (2026-09-18)
+
+The webhook used to fall back to `JSON.parse(body)` with no signature check
+when `STRIPE_WEBHOOK_SECRET` was unset, which is exactly how production ran.
+Anyone could POST a forged `checkout.session.completed` to the public route
+and mark any pending order paid (test mode, so demo integrity rather than
+money, but a real authz hole).
+
+- **No secret, no processing.** The route returns 503 "Webhook not
+  configured" before reading the body and logs the misconfiguration once per
+  process. There is no dev bypass flag: `stripe listen` gives local dev a
+  real `whsec_`, and a flag would be one more thing to defend.
+- **Verify over the raw body** with the static `Stripe.webhooks.constructEvent`
+  (a pure HMAC check, so verification needs neither `STRIPE_SECRET_KEY` nor
+  network). Missing or invalid signature returns 400 with no verifier detail.
+- **Idempotency stays in the data layer.** `markOrderPaid` and
+  `markOrderCancelled` only move `pending` orders, so a replayed signed event
+  (or an `expired` arriving after `completed`) is a no-op. No event-id table.
+- **The site keeps working with the webhook off**: the confirmation page's
+  `checkout.sessions.retrieve` reconcile is the fallback path.

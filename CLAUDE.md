@@ -25,6 +25,12 @@ Deployed at harborbistro.projectnexuscode.org via the Phase 0 demo infra
   double-dashes, parens, or commas.
 - **Stripe TEST mode only.** Never a live key. Test card 4242 4242 4242
   4242 in all examples.
+- **The Stripe webhook fails closed.** `/api/webhooks/stripe` processes an
+  event only after `Stripe.webhooks.constructEvent` verifies it against
+  `STRIPE_WEBHOOK_SECRET` over the raw body. No secret means 503 for every
+  request. Never reintroduce an unsigned/`JSON.parse` fallback, even for dev
+  (use `stripe listen` for a local `whsec_`). Setup steps: README "Stripe
+  webhook".
 - **Demo-only banner** stays visible at the site footer: orders and
   reservations are not real.
 - **Mobile-first.** Most restaurant browsing happens on phones. Hero LCP
