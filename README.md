@@ -27,8 +27,8 @@ npm run dev
 ## Pages
 
 `/` home, `/menu` (+ `/menu/[slug]`), `/order` cart + checkout,
-`/order/confirmation/[id]`, `/order/status/[id]`, `/reserve`
-(+ confirmation), `/about`, `/visit`, `/private-events`.
+`/order/confirmation/[id]`, `/reservations`
+(+ `/reservations/[id]` confirmation), `/about`, `/visit`, `/private-events`.
 
 ## Project docs
 
