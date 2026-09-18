@@ -17,7 +17,6 @@
 import type Stripe from "stripe";
 import { getDb } from "../src/lib/db";
 import {
-  CartError,
   createPendingOrder,
   getOrder,
   markOrderCancelled,
