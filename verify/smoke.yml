@@ -20,7 +20,7 @@ surfaces:
       - { type: text_present, text: "Harbor Bistro" }
       - { type: text_present, text: "Coastal-inspired, locally sourced" }
       - { type: selector_present, selector: "main" }
-      - { type: selector_present, selector: "a[href='/reserve']" }
+      - { type: selector_present, selector: "a[href='/reservations']" }
       - { type: selector_present, selector: "a[href='/menu']" }
       - { type: header_present, header: "Strict-Transport-Security" }
 

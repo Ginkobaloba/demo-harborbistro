@@ -27,7 +27,7 @@ assertions:
   - { type: selector_present, selector: "main" }
   - { type: selector_present, selector: "section" }
   # Hero CTAs
-  - { type: selector_present, selector: "a[href='/reserve']" }
+  - { type: selector_present, selector: "a[href='/reservations']" }
   - { type: selector_present, selector: "a[href='/menu']" }
   # Featured menu grid
   - { type: selector_present, selector: "ul li a[href^='/menu/']" }
