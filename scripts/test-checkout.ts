@@ -78,10 +78,31 @@ function itemWithRequiredSingle(): MenuItem | null {
   return null;
 }
 
+function itemWithoutRequiredSingle(): MenuItem | null {
+  const slugs = (
+    getDb().prepare("SELECT slug FROM menu_items").all() as { slug: string }[]
+  ).map((r) => r.slug);
+  for (const slug of slugs) {
+    const item = getItemBySlug(slug);
+    if (
+      item &&
+      !item.customizationOptions.some((g) => g.type === "single" && g.required)
+    ) {
+      return item;
+    }
+  }
+  return null;
+}
+
 async function main() {
   // --- repricing ---------------------------------------------------------
-  const slug = anySlug();
-  const item = getItemBySlug(slug)!;
+  const itemForBasicTests = itemWithoutRequiredSingle();
+  if (!itemForBasicTests) {
+    console.error("No items without required options found. Run npm run db:seed first.");
+    process.exit(1);
+  }
+  const slug = itemForBasicTests.slug;
+  const item = itemForBasicTests;
 
   const priced = priceCart([{ slug, quantity: 2 }]);
   check("priceCart returns one line", priced.lines.length === 1);
