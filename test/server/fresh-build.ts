@@ -8,7 +8,7 @@ import path from "node:path";
  * a stale build means the suite either tests old code as if it were
  * current, or serves a pre-fix page while the checkout has moved on. A
  * comment telling the human to rebuild first ("Needs a fresh `npm run
- * build`") is not a check (D-019, docs/decisions.md).
+ * build`") is not a check (D-020, docs/decisions.md).
  *
  * `assertFreshBuild` reads the stamp `scripts/build-stamp.mjs` writes as
  * `postbuild` (`.next/BUILD_STAMP.json`) and throws BEFORE any server is

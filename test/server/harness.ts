@@ -8,7 +8,7 @@ import { assertFreshBuild } from "./fresh-build";
 /**
  * Starts the BUILT standalone server (the same `server.js` the container
  * runs) for the real-server suites. Refuses to start against a stale build:
- * `assertFreshBuild` (D-019) checks the build's recorded git sha against the
+ * `assertFreshBuild` (D-020) checks the build's recorded git sha against the
  * current checkout before anything is spawned.
  */
 export const ROOT = path.resolve(__dirname, "..", "..");

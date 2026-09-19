@@ -13,7 +13,7 @@ import { assertFreshBuild } from "./fresh-build";
  * handlers directly, which cannot see what Next.js does in front of them
  * (the #31 deep verify found middleware buffering whole uploads). This suite
  * starts the BUILT standalone server, the same `server.js` the container
- * runs, and talks raw HTTP to it. `assertFreshBuild` (D-019) refuses to
+ * runs, and talks raw HTTP to it. `assertFreshBuild` (D-020) refuses to
  * start it against a build that does not match the current checkout.
  *
  * Run:

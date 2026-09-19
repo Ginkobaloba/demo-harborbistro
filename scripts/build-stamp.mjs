@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Records the build's git identity into .next/BUILD_STAMP.json so the
 // real-server test suite (test/server/*.server.test.ts) can refuse to run
-// against a stale build (D-019, docs/decisions.md). "Stale" means the
+// against a stale build (D-020, docs/decisions.md). "Stale" means the
 // standalone server.js the suite would start was built from a different
 // commit than the one currently checked out, or from a dirty tree -- either
 // way, the suite would be testing something other than the code in front of

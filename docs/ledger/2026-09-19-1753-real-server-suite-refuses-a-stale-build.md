@@ -7,7 +7,7 @@
   clears any stale stamp) and `test/server/fresh-build.ts` (`assertFreshBuild`,
   called from `test/server/harness.ts` and
   `test/server/body-caps.server.test.ts` before either starts a server).
-  Added the `test:server` npm script. Recorded as D-019.
+  Added the `test:server` npm script. Recorded as D-020.
 - **Why:** Both real-server test files started `.next/standalone/server.js`
   on the strength of a code comment telling the human to rebuild first. A
   comment is not a check: nothing stopped the suite from running against a
@@ -22,5 +22,5 @@
   slatewell's Playwright e2e scripts require an already-running server on
   BASE_URL as a documented prerequisite but never build or spawn one
   themselves, so there is no in-repo build/db path for them to check).
-- **Refs:** docs/decisions.md D-019, test/server/fresh-build.ts,
+- **Refs:** docs/decisions.md D-020, test/server/fresh-build.ts,
   scripts/build-stamp.mjs, PR (this branch fix/stale-build-guard).
