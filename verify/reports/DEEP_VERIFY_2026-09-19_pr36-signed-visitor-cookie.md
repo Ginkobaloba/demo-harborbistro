@@ -29,7 +29,7 @@ Totals:
 
 Blockers: none. Warnings: 9, none blocking. This PASS does not cover headed
 Chrome, a headless browser layer, real Stripe, the live proxy or the public
-URL (see section 8).
+URL (see section 11).
 
 ## 1. Target and scope
 
@@ -43,7 +43,7 @@ URL (see section 8).
   the deep gate applies.
 - **Mode:** deep, layers 1, 2, 3 and 6. Layers 4 and 5 (headless and headed
   browser) were not run; the surface under test is cookie and HTTP shaped and
-  was exercised at the wire level instead. Stated again in section 8 so this
+  was exercised at the wire level instead. Stated again in section 11 so this
   report is not read as covering them.
 - **Verifier:** an independent session. I did not write this code.
 
@@ -374,8 +374,8 @@ or to reuse one parser everywhere. Not a scope escalation and not a blocker.
 
 **W2. "Logged once at boot" is three times per process.** Each unusable
 secret produces 3 identical `[session-secret]` lines (Node instrumentation
-plus the other runtimes that import the module, including the Edge isolate).
-Bounded, constant under load, never the value. The PR body and D-018 say
+plus the other module instances that import it; which runtimes those are was
+not measured). Bounded, constant under load, never the value. The PR body and D-018 say
 "once"; the code says once per problem per module instance.
 
 **W3. One server-suite timing flake.** The first run of
