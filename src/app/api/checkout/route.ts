@@ -4,6 +4,7 @@ import {
   CartError,
   createPendingOrder,
   lineDescription,
+  parseTipCents,
   priceCart,
   unusedOrderId,
 } from "@/lib/orders";
@@ -23,6 +24,15 @@ import type { Fulfillment } from "@/lib/types";
 // better-sqlite3 and the Stripe SDK both need the Node.js runtime.
 export const runtime = "nodejs";
 
+const ORDER_NOT_SAVED = "Your order could not be saved. Please try again.";
+
+/** Log a persistence failure by order id and error class only (no PII). */
+function logSaveFailure(orderId: string, err: unknown): void {
+  console.error(
+    `[checkout] could not save order ${orderId}: ${String((err as { name?: unknown })?.name ?? "Error")}`,
+  );
+}
+
 const PAYMENT_UNAVAILABLE =
   "The payment service is temporarily unavailable, so your order was not placed. Please try again in a moment.";
 
@@ -32,7 +42,8 @@ const PAYMENT_UNAVAILABLE =
  * Body: {
  *   lines: { slug, quantity, selections? }[],
  *   customerName, customerPhone, customerEmail?,
- *   fulfillment: "pickup" | "delivery", deliveryAddress?, tipCents?
+ *   fulfillment: "pickup" | "delivery", deliveryAddress?,
+ *   tipCents? (non-negative integer, at most MAX_TIP_CENTS)
  * }
  *
  * Reprices the cart from the menu database (the client never sets prices),
@@ -80,10 +91,9 @@ export async function POST(req: NextRequest) {
   const customerEmailRaw = value(fields.customerEmail);
   const deliveryAddress = value(fields.deliveryAddress);
   const fulfillment = body.fulfillment as Fulfillment;
-  const tipCents =
-    Number.isFinite(Number(body.tipCents)) && Number(body.tipCents) >= 0
-      ? Math.round(Number(body.tipCents))
-      : 0;
+  const tip = parseTipCents(body.tipCents);
+  if (!tip.ok) return NextResponse.json({ error: tip.error }, { status: 400 });
+  const tipCents = tip.value;
 
   if (!customerName || !customerPhone) {
     return NextResponse.json(
@@ -122,7 +132,13 @@ export async function POST(req: NextRequest) {
   // The id is minted first because the session needs it (client reference,
   // metadata, success/cancel URLs); nothing touches the database until the
   // session exists, so a Stripe failure leaves no row behind.
-  const orderId = unusedOrderId();
+  let orderId: string;
+  try {
+    orderId = unusedOrderId();
+  } catch (err) {
+    logSaveFailure("(unminted)", err);
+    return NextResponse.json({ error: ORDER_NOT_SAVED }, { status: 500 });
+  }
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
     priced.lines.map((line) => {
@@ -197,13 +213,8 @@ export async function POST(req: NextRequest) {
     // The session exists but the row could not be written. The unused test
     // session simply expires at Stripe; the client gets a JSON error, not an
     // empty 500.
-    console.error(
-      `[checkout] could not save order ${orderId}: ${String((err as { name?: unknown })?.name ?? "Error")}`,
-    );
-    return NextResponse.json(
-      { error: "Your order could not be saved. Please try again." },
-      { status: 500 },
-    );
+    logSaveFailure(orderId, err);
+    return NextResponse.json({ error: ORDER_NOT_SAVED }, { status: 500 });
   }
 
   const res = NextResponse.json({ url: session.url, orderId: order.id });

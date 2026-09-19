@@ -11,6 +11,8 @@ import type {
 } from "./types";
 
 export const MAX_LINE_QUANTITY = 12;
+/** Largest tip accepted, in cents ($1,000). Far above any real tip. */
+export const MAX_TIP_CENTS = 100_000;
 /** Distinct cart lines per order; bounds the pricing work one request can cause. */
 export const MAX_CART_LINES = 50;
 
@@ -91,7 +93,8 @@ function normalizeSelections(
       out[group.id] = value;
     } else {
       if (value == null) continue;
-      const arr = Array.isArray(value) ? value : [value];
+      // De-duplicated: each add-on is chosen (and charged) at most once.
+      const arr = [...new Set(Array.isArray(value) ? value : [value])];
       for (const id of arr) {
         if (!validId(id)) {
           throw new CartError(`Invalid ${group.label} for ${item.name}`);
@@ -102,6 +105,30 @@ function normalizeSelections(
   }
 
   return out;
+}
+
+/**
+ * Validate the client's tip. Absent or null means no tip. Anything else must
+ * be a JSON number that is a non-negative integer no larger than
+ * MAX_TIP_CENTS; booleans, strings, arrays and fractions are refused rather
+ * than coerced.
+ */
+export function parseTipCents(
+  raw: unknown,
+): { ok: true; value: number } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: 0 };
+  if (
+    typeof raw !== "number" ||
+    !Number.isInteger(raw) ||
+    raw < 0 ||
+    raw > MAX_TIP_CENTS
+  ) {
+    return {
+      ok: false,
+      error: `Tip must be a whole number of cents from 0 to ${MAX_TIP_CENTS}`,
+    };
+  }
+  return { ok: true, value: raw === 0 ? 0 : raw }; // folds -0 to 0
 }
 
 /**

@@ -42,6 +42,7 @@ vi.mock("@/lib/stripe", () => ({
 
 const VISITOR = "33333333-3333-4333-8333-333333333333";
 const ITEM = "test-chowder";
+const BURGER = "test-burger";
 
 type RouteModule = typeof import("./route");
 type Limits = typeof import("@/lib/request-body");
@@ -86,6 +87,23 @@ beforeAll(async () => {
     `INSERT INTO menu_items (slug, name, course, description, price_cents, customization_options)
      VALUES (?, 'Test Chowder', 'entrees', 'A bowl for tests.', 1800, '[]')`,
   ).run(ITEM);
+  db.prepare(
+    `INSERT INTO menu_items (slug, name, course, description, price_cents, customization_options)
+     VALUES (?, 'Test Burger', 'entrees', 'A burger for tests.', 1700, ?)`,
+  ).run(
+    BURGER,
+    JSON.stringify([
+      {
+        id: "extras",
+        label: "Extras",
+        type: "multi",
+        choices: [
+          { id: "bacon", label: "Add bacon", priceCents: 300 },
+          { id: "egg", label: "Add egg", priceCents: 200 },
+        ],
+      },
+    ]),
+  );
   route = await import("./route");
   limits = await import("@/lib/request-body");
 });
@@ -265,7 +283,10 @@ describe("POST /api/checkout input caps", () => {
     expect(orderCount()).toBe(0);
   });
 
-  it("refuses an oversized body even when Content-Length understates it", async () => {
+  // In-process only: on a real server Node's framing stops at the declared
+  // length, so an understated Content-Length yields truncated JSON (400).
+  // test/server/body-caps.server.test.ts covers the real-server behaviour.
+  it("counts the streamed bytes rather than trusting Content-Length (in-process)", async () => {
     stripeState.create = vi.fn();
     const raw = JSON.stringify(validBody({ customerName: "x".repeat(64 * 1024) }));
     const res = await route.POST(checkout(null, { raw, headers: { "content-length": "10" } }));
@@ -280,5 +301,104 @@ describe("POST /api/checkout input caps", () => {
     const res = await route.POST(checkout(validBody({ lines })));
     expect(res.status).toBe(400);
     expect(orderCount()).toBe(0);
+  });
+});
+
+describe("POST /api/checkout tip validation (W4)", () => {
+  const happy = async () => ({ id: "cs_test_tip", url: "https://checkout.stripe.test/c/tip" });
+
+  for (const [label, tip] of [
+    ["a boolean", true],
+    ["an array", [5]],
+    ["a numeric string", " 7 "],
+    ["a fraction", 12.5],
+    ["a negative number", -500],
+    ["one cent over the cap", 100_001],
+    ["an absurd amount", 1e20],
+    ["an object", { cents: 5 }],
+  ] as const) {
+    it(`refuses ${label} with 400, before Stripe, storing nothing`, async () => {
+      const create = vi.fn(happy);
+      stripeState.create = create;
+      const res = await route.POST(checkout(validBody({ tipCents: tip })));
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/tip/i);
+      expect(create).not.toHaveBeenCalled();
+      expect(orderCount()).toBe(0);
+    });
+  }
+
+  it("accepts a tip of exactly MAX_TIP_CENTS", async () => {
+    const { MAX_TIP_CENTS } = await import("@/lib/orders");
+    stripeState.create = happy;
+    const res = await route.POST(checkout(validBody({ tipCents: MAX_TIP_CENTS })));
+    expect(res.status).toBe(200);
+    const row = db.prepare("SELECT tip_cents, total_cents FROM orders").get() as Record<string, number>;
+    expect(row.tip_cents).toBe(MAX_TIP_CENTS);
+    expect(row.total_cents).toBe(3600 + MAX_TIP_CENTS);
+  });
+
+  it("treats an absent or null tip as no tip", async () => {
+    stripeState.create = happy;
+    for (const tipCents of [undefined, null, 0]) {
+      db.prepare("DELETE FROM orders").run();
+      const res = await route.POST(checkout(validBody({ tipCents })));
+      expect(res.status).toBe(200);
+      const row = db.prepare("SELECT tip_cents, total_cents FROM orders").get() as Record<string, number>;
+      expect(row).toEqual({ tip_cents: 0, total_cents: 3600 });
+    }
+  });
+});
+
+describe("POST /api/checkout add-on de-duplication (W5)", () => {
+  it("charges a repeated add-on once", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    stripeState.create = async (params) => {
+      calls.push(params as Record<string, unknown>);
+      return { id: "cs_test_dedupe", url: "https://checkout.stripe.test/c/dedupe" };
+    };
+    const lines = [
+      { slug: BURGER, quantity: 1, selections: { extras: Array.from({ length: 200 }, () => "bacon") } },
+      { slug: BURGER, quantity: 1, selections: { extras: ["bacon", "egg", "bacon", "egg"] } },
+    ];
+    const res = await route.POST(checkout(validBody({ lines, tipCents: 0 })));
+    expect(res.status).toBe(200);
+    const items = calls[0].line_items as Array<{ price_data: { unit_amount: number } }>;
+    expect(items.map((l) => l.price_data.unit_amount)).toEqual([1700 + 300, 1700 + 300 + 200]);
+    const row = db.prepare("SELECT items, subtotal_cents FROM orders").get() as { items: string; subtotal_cents: number };
+    expect(row.subtotal_cents).toBe(2000 + 2200);
+    const stored = JSON.parse(row.items) as Array<{ selections: Record<string, string[]> }>;
+    expect(stored[0].selections.extras).toEqual(["bacon"]);
+    expect(stored[1].selections.extras).toEqual(["bacon", "egg"]);
+  });
+});
+
+describe("POST /api/checkout order-id minting failure (W3)", () => {
+  it("answers the JSON 500 used for save failures, before Stripe, with no row", async () => {
+    const orders = await import("@/lib/orders");
+    // Make every candidate id collide: the minting loop gives up.
+    const realGetDb = (await import("@/lib/db")).getDb;
+    const conn = realGetDb();
+    const prepare = conn.prepare.bind(conn);
+    const spy = vi.spyOn(conn, "prepare").mockImplementation(((sql: string) => {
+      if (sql === "SELECT 1 FROM orders WHERE id = ?") return { get: () => ({ 1: 1 }) };
+      return prepare(sql);
+    }) as typeof conn.prepare);
+    const create = vi.fn();
+    stripeState.create = create;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(() => orders.unusedOrderId()).toThrow();
+    const res = await route.POST(checkout(validBody()));
+    spy.mockRestore();
+
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toMatch(/application\/json/);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "Your order could not be saved. Please try again.",
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(orderCount()).toBe(0);
+    expect(String(logged.mock.calls[0][0])).not.toContain("Test Diner");
   });
 });

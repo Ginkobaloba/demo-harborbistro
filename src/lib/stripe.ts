@@ -13,13 +13,24 @@ import { StripeModeError, checkStripeTestMode } from "./stripe-mode";
  */
 let cached: { key: string; client: Stripe } | null = null;
 
+/**
+ * Fail fast (D-017). The SDK default is an 80 s timeout with two retries, so
+ * a hung Stripe took about 241 s to surface, far past the demo proxy's 60 s
+ * read timeout: the visitor got the proxy's 504, not checkout's 503. 10 s
+ * with one retry answers in roughly 21 s at worst.
+ */
+export const STRIPE_CLIENT_OPTIONS = {
+  timeout: 10_000,
+  maxNetworkRetries: 1,
+} as const;
+
 export function getStripe(): Stripe {
   const mode = checkStripeTestMode(process.env);
   if (!mode.ok) {
     throw new StripeModeError(mode.message);
   }
   if (!cached || cached.key !== mode.secretKey) {
-    cached = { key: mode.secretKey, client: new Stripe(mode.secretKey) };
+    cached = { key: mode.secretKey, client: new Stripe(mode.secretKey, STRIPE_CLIENT_OPTIONS) };
   }
   return cached.client;
 }

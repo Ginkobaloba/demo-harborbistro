@@ -318,10 +318,45 @@ A deep verify of #28 found two pre-existing defects: with Stripe unreachable,
   (`src/lib/request-body.ts`): checkout 32 KB, reservations 8 KB, admin
   actions 1 KB, portal handoff 16 KB. A declared `Content-Length` over the
   cap is refused up front, and the stream is counted as it is read so a
-  chunked or understated upload is cut off at the cap. Over the cap is 413;
-  unparseable or non-object JSON is 400. The Stripe webhook is untouched: it
-  must read the exact raw body for signature verification (D-015) and stores
-  no visitor text.
+  chunked upload is cut off at the cap. Over the cap is 413; unparseable or
+  non-object JSON is 400. (An understated `Content-Length` never reaches the
+  counter on a real server: Node's HTTP framing stops at the declared length,
+  so the handler sees truncated JSON and answers 400.) The Stripe webhook is
+  untouched: it must read the exact raw body for signature verification
+  (D-015) and stores no visitor text.
+- **Middleware no longer runs on `/api/`.** The first cut of this decision
+  capped bodies in the handlers only, and the #31 deep verify showed it did
+  not work on a real server: when middleware runs on a request with a body,
+  Next 15.5 clones and buffers the whole upload (up to
+  `middlewareClientMaxBodySize`, default 10 MB) and waits for it to end
+  before the route handler starts. An endless chunked upload hung, a
+  declared 1 MB got no early 413, and memory climbed under concurrent 9 MB
+  uploads. The matcher now skips `api/`. Nothing under `/api/` needed it:
+  the write routes mint and set `hb_visitor` themselves
+  (`visitorIdForWrite`), and the reads use the cookie the browser already
+  holds from the pages (seed-only scope without one). As defence in depth,
+  `experimental.middlewareClientMaxBodySize` is `64kb`.
+- **Proven against the built server, not just the handlers.**
+  `test/server/body-caps.server.test.ts` starts `.next/standalone/server.js`
+  (what the container runs) and sends raw HTTP: a declared 1 MB body gets 413
+  in well under a second, an endless chunked upload gets 413 at the cap, the
+  exact-cap body is accepted, and pages still get the visitor cookie while
+  `/api/` does not. It needs a fresh build, so it has its own config:
+  `npm run build` then `npx vitest run --config vitest.server.config.ts`.
+  With the old matcher, the upload cases time out (no response in 10 s).
+- **Stripe fails fast.** The client is built with a 10 s timeout and one
+  retry (`STRIPE_CLIENT_OPTIONS`), about 21 s worst case, so a hung Stripe
+  yields checkout's own 503 inside the proxy's 60 s read timeout instead of
+  a 504 after about 241 s.
+- **Tips are validated, not coerced.** `tipCents` must be a JSON number that
+  is a non-negative integer no larger than `MAX_TIP_CENTS` (100000, i.e.
+  $1,000); absent or null means no tip. Booleans, strings, arrays and
+  fractions are 400 (they used to be coerced, and 1e20 was forwarded to
+  Stripe). Multi-select add-on ids are de-duplicated, so a repeated add-on is
+  charged once.
+- **Every failure before the response is JSON.** Minting the order id
+  (`unusedOrderId`) is now wrapped in a try that returns the same JSON 500
+  as a failed insert, before Stripe is called.
 - **Field limits** (`FIELD_LIMITS`): name 100, phone 32, email 254, address
   300, notes 500 characters, measured after trimming in UTF-16 units, the
   same unit as the forms' `maxLength` (which now mirror them). Non-string

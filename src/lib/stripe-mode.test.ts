@@ -78,4 +78,16 @@ describe("getStripe / isStripeConfigured", () => {
     expect(isStripeConfigured()).toBe(true);
     expect(getStripe()).toBeTruthy();
   });
+
+  it("builds the client with a 10 s timeout and one retry, so a hung Stripe fails fast", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_timeouts");
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "");
+    const { getStripe } = await import("./stripe");
+    const client = getStripe() as unknown as {
+      getApiField: (k: string) => unknown;
+      getMaxNetworkRetries: () => number;
+    };
+    expect(client.getApiField("timeout")).toBe(10_000);
+    expect(client.getMaxNetworkRetries()).toBe(1);
+  });
 });
