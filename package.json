@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "db:seed": "tsx scripts/seed.ts",
     "db:verify": "tsx scripts/verify-seed.ts",
-    "test:checkout": "tsx scripts/test-checkout.ts"
+    "test:checkout": "tsx scripts/test-checkout.ts",
+    "db:purge-visitors": "tsx scripts/purge-visitor-data.ts",
+    "verify:visitor-scope": "tsx scripts/verify-visitor-scope.ts"
   },
   "dependencies": {
     "@paradigm-codes/auth": "^0.1.0",

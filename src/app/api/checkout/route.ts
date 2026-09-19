@@ -7,8 +7,10 @@ import {
   lineDescription,
   priceCart,
 } from "@/lib/orders";
-import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
+import { checkStripeTestMode } from "@/lib/stripe-mode";
 import { publicOrigin } from "@/lib/origin";
+import { visitorCookieAttributes, visitorIdForWrite } from "@/lib/visitor";
 import type { Fulfillment } from "@/lib/types";
 
 // better-sqlite3 and the Stripe SDK both need the Node.js runtime.
@@ -28,11 +30,15 @@ export const runtime = "nodejs";
  * hosted-checkout URL. Returns { url, orderId } (200) or { error } (400/503).
  */
 export async function POST(req: NextRequest) {
-  if (!isStripeConfigured()) {
+  const stripeMode = checkStripeTestMode(process.env);
+  if (!stripeMode.ok) {
+    if (stripeMode.reason === "not_test_mode") console.error(`[checkout] ${stripeMode.message}`);
     return NextResponse.json(
       {
         error:
-          "Online payment is not configured in this environment. Set STRIPE_SECRET_KEY (test mode) to enable checkout.",
+          stripeMode.reason === "not_test_mode"
+            ? "Online payment is disabled: this demo only runs with Stripe test-mode keys."
+            : "Online payment is not configured in this environment. Set STRIPE_SECRET_KEY (test mode) to enable checkout.",
       },
       { status: 503 },
     );
@@ -84,6 +90,10 @@ export async function POST(req: NextRequest) {
     throw err;
   }
 
+  // Tag the order with this browser's visitor id so only this browser (and
+  // no other visitor) can see it in the admin views and confirmation (D-016).
+  const visitor = visitorIdForWrite(req);
+
   const order = createPendingOrder({
     lines: priced.lines,
     subtotalCents: priced.subtotalCents,
@@ -93,6 +103,7 @@ export async function POST(req: NextRequest) {
     customerEmail: customerEmailRaw || null,
     fulfillment,
     deliveryAddress: fulfillment === "delivery" ? deliveryAddress : null,
+    visitorId: visitor.visitorId,
   });
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
@@ -138,5 +149,9 @@ export async function POST(req: NextRequest) {
 
   attachCheckoutSession(order.id, session.id);
 
-  return NextResponse.json({ url: session.url, orderId: order.id });
+  const res = NextResponse.json({ url: session.url, orderId: order.id });
+  if (visitor.minted) {
+    res.cookies.set({ ...visitorCookieAttributes(), value: visitor.visitorId });
+  }
+  return res;
 }

@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import { newReservationId } from "./ids";
 import type { Reservation } from "./types";
+import { SEED_ONLY, scopeSql, type VisitorScope } from "./visitor";
 
 /**
  * All possible time slots per day-of-week (0=Sun, 1=Mon closed, 2=Tue...6=Sat).
@@ -27,7 +28,11 @@ export function slotsForDate(dateStr: string): string[] {
   return ALL_SLOTS[dow] ?? [];
 }
 
-/** Slots for a date that have not yet hit SLOT_CAPACITY confirmed reservations. */
+/**
+ * Slots for a date that have not yet hit SLOT_CAPACITY confirmed reservations.
+ * Deliberately unscoped: it returns only per-slot availability (no names, no
+ * contact details), and capacity is shared by every guest.
+ */
 export function getAvailableSlots(dateStr: string): string[] {
   const all = slotsForDate(dateStr);
   if (all.length === 0) return [];
@@ -68,13 +73,16 @@ export function createReservation(data: {
   date: string;
   time: string;
   notes?: string | null;
+  /** The creating browser's visitor id (D-016). Required: no untagged rows. */
+  visitorId: string;
 }): Reservation {
   const db = getDb();
   const id = newReservationId();
   db.prepare(
     `INSERT INTO reservations
-       (id, name, phone, email, party_size, reserved_date, reserved_time, notes, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`
+       (id, name, phone, email, party_size, reserved_date, reserved_time, notes, status,
+        visitor_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`
   ).run(
     id,
     data.name,
@@ -83,38 +91,53 @@ export function createReservation(data: {
     data.partySize,
     data.date,
     data.time,
-    data.notes ?? null
+    data.notes ?? null,
+    data.visitorId
   );
-  return getReservation(id)!;
+  return getReservation(id, { visitorId: data.visitorId })!;
 }
 
-export function getReservation(id: string): Reservation | null {
-  const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM reservations WHERE id = ?")
-    .get(id) as Record<string, unknown> | undefined;
+/**
+ * Look up a reservation the caller is allowed to see: a seed booking or one
+ * made by the caller's own browser (D-016). Returns null for an unknown id
+ * and for another visitor's booking alike.
+ */
+export function getReservation(
+  id: string,
+  scope: VisitorScope = SEED_ONLY,
+): Reservation | null {
+  const { sql, params } = scopeSql(scope);
+  const row = getDb()
+    .prepare(`SELECT * FROM reservations WHERE id = ? AND ${sql}`)
+    .get(id, ...params) as Record<string, unknown> | undefined;
   if (!row) return null;
   return rowToReservation(row);
 }
 
-export function getAllReservations(): Reservation[] {
-  const db = getDb();
-  const rows = db
+/** The full book, scoped to seed bookings plus the caller's own. */
+export function getAllReservations(scope: VisitorScope = SEED_ONLY): Reservation[] {
+  const { sql, params } = scopeSql(scope);
+  const rows = getDb()
     .prepare(
-      "SELECT * FROM reservations ORDER BY reserved_date, reserved_time, created_at"
+      `SELECT * FROM reservations WHERE ${sql}
+       ORDER BY reserved_date, reserved_time, created_at`
     )
-    .all() as Record<string, unknown>[];
+    .all(...params) as Record<string, unknown>[];
   return rows.map(rowToReservation);
 }
 
-/** Today's bookings (local date), in service order. */
-export function getReservationsForDate(dateStr: string): Reservation[] {
-  const db = getDb();
-  const rows = db
+/** Bookings on a date (local), in service order. Scoped like getAllReservations. */
+export function getReservationsForDate(
+  dateStr: string,
+  scope: VisitorScope = SEED_ONLY,
+): Reservation[] {
+  const { sql, params } = scopeSql(scope);
+  const rows = getDb()
     .prepare(
-      "SELECT * FROM reservations WHERE reserved_date = ? ORDER BY reserved_time, created_at"
+      `SELECT * FROM reservations WHERE reserved_date = ? AND ${sql}
+       ORDER BY reserved_time, created_at`
     )
-    .all(dateStr) as Record<string, unknown>[];
+    .all(dateStr, ...params) as Record<string, unknown>[];
   return rows.map(rowToReservation);
 }
 
@@ -142,6 +165,17 @@ export class ReservationTransitionError extends Error {
   }
 }
 
+/**
+ * Raised when the reservation is unknown or belongs to another visitor.
+ * Routes map it to 404, so an out-of-scope id looks exactly like a missing one.
+ */
+export class ReservationNotFoundError extends ReservationTransitionError {
+  constructor(id: string) {
+    super(`Unknown reservation ${id}`);
+    this.name = "ReservationNotFoundError";
+  }
+}
+
 export function canTransitionReservation(
   from: Reservation["status"],
   to: Reservation["status"],
@@ -151,15 +185,17 @@ export function canTransitionReservation(
 
 /**
  * Move a reservation to a new status, enforcing the host-stand flow. Throws
- * ReservationTransitionError on an unknown id or an illegal transition.
+ * ReservationNotFoundError for an unknown or out-of-scope id and
+ * ReservationTransitionError for an illegal transition.
  */
 export function setReservationStatus(
   id: string,
   to: Reservation["status"],
+  scope: VisitorScope = SEED_ONLY,
 ): Reservation {
-  const current = getReservation(id);
+  const current = getReservation(id, scope);
   if (!current) {
-    throw new ReservationTransitionError(`Unknown reservation ${id}`);
+    throw new ReservationNotFoundError(id);
   }
   if (current.status === to) return current;
   if (!canTransitionReservation(current.status, to)) {
@@ -170,7 +206,7 @@ export function setReservationStatus(
   getDb()
     .prepare("UPDATE reservations SET status = ? WHERE id = ?")
     .run(to, id);
-  return getReservation(id)!;
+  return getReservation(id, scope)!;
 }
 
 /** Today as a local YYYY-MM-DD string (matches how reserved_date is stored). */

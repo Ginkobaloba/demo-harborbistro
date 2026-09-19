@@ -10,6 +10,8 @@ import {
 import type { Reservation } from "@/lib/types";
 import { AutoRefresh } from "@/components/admin/AutoRefresh";
 import { ReservationActions } from "@/components/admin/ReservationActions";
+import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
+import { readVisitorScope } from "@/lib/visitor-server";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +36,12 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-export default function AdminReservationsPage() {
+export default async function AdminReservationsPage() {
+  // Seed bookings plus this browser's own bookings only (D-016).
+  const scope = await readVisitorScope();
   const today = todayLocalDate();
-  const todays = getReservationsForDate(today);
-  const all = getAllReservations();
+  const todays = getReservationsForDate(today, scope);
+  const all = getAllReservations(scope);
   const covers = todays
     .filter((r) => r.status !== "cancelled")
     .reduce((n, r) => n + r.partySize, 0);
@@ -63,6 +67,8 @@ export default function AdminReservationsPage() {
           </Link>
         </nav>
       </div>
+
+      <DemoScopeNote />
 
       {/* Today's service: the host-stand working set. */}
       <h2 className="mt-8 font-serif text-2xl">Tonight</h2>

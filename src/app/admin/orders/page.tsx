@@ -11,6 +11,8 @@ import {
 import { ORDER_STATUS_LABELS, type Order, type OrderStatus } from "@/lib/types";
 import { AutoRefresh } from "@/components/admin/AutoRefresh";
 import { OrderActions } from "@/components/admin/OrderActions";
+import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
+import { readVisitorScope } from "@/lib/visitor-server";
 
 export const dynamic = "force-dynamic";
 
@@ -85,10 +87,12 @@ function OrderCard({ order }: { order: Order }) {
   );
 }
 
-export default function AdminOrdersPage() {
-  const active = getActiveOrders();
-  const recent = getRecentOrders(20);
-  const counts = getKitchenCounts();
+export default async function AdminOrdersPage() {
+  // Seed orders plus this browser's own orders only (D-016).
+  const scope = await readVisitorScope();
+  const active = getActiveOrders(scope);
+  const recent = getRecentOrders(scope, 20);
+  const counts = getKitchenCounts(scope);
 
   const byStatus = new Map<OrderStatus, Order[]>();
   for (const s of ACTIVE_ORDER_STATUSES) byStatus.set(s, []);
@@ -114,6 +118,8 @@ export default function AdminOrdersPage() {
           </Link>
         </nav>
       </div>
+
+      <DemoScopeNote />
 
       <div className="mt-8 grid gap-4 md:grid-cols-3">
         {ACTIVE_ORDER_STATUSES.map((status) => {

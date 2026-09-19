@@ -4,6 +4,7 @@ import {
   createReservation,
   slotsForDate,
 } from "@/lib/reservations";
+import { visitorCookieAttributes, visitorIdForWrite } from "@/lib/visitor";
 
 /** GET /api/reservations?date=YYYY-MM-DD -> { slots: string[], isClosed: boolean } */
 export async function GET(req: NextRequest) {
@@ -62,6 +63,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Tag the booking with this browser's visitor id so no other visitor can
+  // see it in the admin views or on its confirmation page (D-016).
+  const visitor = visitorIdForWrite(req);
+
   const reservation = createReservation({
     name: String(name),
     phone: String(phone),
@@ -70,7 +75,12 @@ export async function POST(req: NextRequest) {
     date: String(date),
     time: String(time),
     notes: notes ? String(notes) : null,
+    visitorId: visitor.visitorId,
   });
 
-  return NextResponse.json({ id: reservation.id }, { status: 201 });
+  const res = NextResponse.json({ id: reservation.id }, { status: 201 });
+  if (visitor.minted) {
+    res.cookies.set({ ...visitorCookieAttributes(), value: visitor.visitorId });
+  }
+  return res;
 }

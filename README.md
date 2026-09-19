@@ -30,7 +30,8 @@ Copy `.env.example` for local work. Runtime-only (never needed by `next build`):
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `STRIPE_SECRET_KEY` | for checkout | Stripe **test** key (`sk_test_...`). Checkout returns 503 without it. |
+| `STRIPE_SECRET_KEY` | for checkout | Stripe **test** key (`sk_test_...`). Checkout returns 503 without it, and refuses any key that is not `sk_test_` (see `src/lib/stripe-mode.ts`). |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | optional | If set, must be a `pk_test_` key or checkout is refused. |
 | `STRIPE_WEBHOOK_SECRET` | for the webhook | Signing secret (`whsec_...`) for `/api/webhooks/stripe`. Without it the webhook **fails closed** (503, no event is processed). |
 | `PUBLIC_BASE_URL` | optional | Override for the public origin used in Stripe success/cancel URLs. |
 | `SESSION_SECRET`, `PORTAL_*` | for portal sign-in | See `.env.example`. |
@@ -54,6 +55,31 @@ To enable it for the deployed demo (Stripe **test mode**):
 
 Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`
 prints a `whsec_` to use as `STRIPE_WEBHOOK_SECRET`.
+
+## Visitor data (demo scope and retention)
+
+`/admin` is open so anyone can try the staff view, but each browser only
+sees the fictional seed records plus the orders and reservations it created
+itself. A random visitor id in the HttpOnly `hb_visitor` cookie tags every
+record; admin views, admin actions and the confirmation pages filter on it
+server-side, and another visitor's record answers 404. Details:
+`docs/decisions.md` D-016.
+
+Retention: visitor-created orders and reservations are deleted 24 hours
+after creation. The purge runs when the server starts and then at most once
+an hour (on the next request that touches the database). Run it by hand with:
+
+```bash
+DRY_RUN=1 npm run db:purge-visitors   # count what would go
+npm run db:purge-visitors             # delete visitor rows older than 24h
+```
+
+Seed rows are never deleted. Rows from before visitor tagging (no visitor id)
+are hidden from every view and only removed with `INCLUDE_LEGACY=1`, which is
+a deliberate one-time operator step.
+
+`npm run verify:visitor-scope` runs a two-browser check against a local
+server (see the header of `scripts/verify-visitor-scope.ts`).
 
 ## Pages
 

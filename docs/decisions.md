@@ -230,3 +230,66 @@ money, but a real authz hole).
   (or an `expired` arriving after `completed`) is a no-op. No event-id table.
 - **The site keeps working with the webhook off**: the confirmation page's
   `checkout.sessions.retrieve` reconcile is the fallback path.
+
+## D-016: Per-visitor demo scope, Stripe test-key guard, 24h retention (2026-09-18)
+
+`/admin` was open by design (D-012: prospects should be able to try the staff
+view), but it showed every order and reservation in the database, including
+the names, phone numbers and emails other visitors typed into `/order` and
+`/reservations`. The fix keeps the open staff view and changes what it can
+see.
+
+- **Visitor id cookie.** `src/middleware.ts` gives every browser a random id
+  (`crypto.randomUUID`, 122 random bits) in `hb_visitor`: HttpOnly,
+  SameSite=Lax, Path=/, Secure in production, 30 days. Lax, not Strict,
+  because the return from Stripe Checkout is a cross-site top-level GET that
+  must carry the cookie. The middleware also injects a newly minted id into
+  the forwarded request so the first page view already sees it. Anything but
+  a lowercase v4 UUID (including the literal `seed`) is replaced.
+- **Every record is tagged.** `orders.visitor_id` and
+  `reservations.visitor_id` hold the creating browser's id; the create routes
+  mint one themselves if the middleware did not, so no row is written
+  untagged. Seed rows carry the reserved marker `seed`.
+- **NULL is legacy, not seed.** An existing database gains the column in
+  place (`migrate()` in `db.ts`, run on open). Seed rows are recognizable by
+  their ISO timestamps (the app's own inserts use `datetime('now')`, which a
+  visitor cannot influence), so they are backfilled to `seed`. Every other
+  existing row stays NULL: visible to nobody, and NOT deleted automatically.
+  Treating NULL as seed would have re-exposed exactly the rows this change
+  exists to hide.
+- **Scope is enforced server-side in the data layer.** Every read a visitor
+  can reach (`getOrder`, `getActiveOrders`, `getRecentOrders`,
+  `getKitchenCounts`, `getReservation`, `getAllReservations`,
+  `getReservationsForDate`) and every operator transition (`advanceOrder`,
+  `cancelActiveOrder`, `setReservationStatus`) takes a scope and matches
+  `visitor_id = 'seed' OR visitor_id = <caller>`. The default scope is
+  seed-only, so a forgotten call site fails closed. The Stripe reconciliation
+  paths (webhook, confirmation reconcile after the scope check) stay
+  unscoped; they are keyed by ids Stripe hands back and carry no cookie.
+  `getAvailableSlots` stays unscoped because it returns only per-slot counts.
+- **Out of scope looks exactly like missing.** Admin POSTs on another
+  visitor's id return 404 with the same body as an unknown id; the public
+  detail routes (`/api/orders/[id]`, `/order/confirmation/[id]`,
+  `/reservations/[id]`) return 404. Order and booking codes are 5 symbols
+  from a 31-symbol alphabet (about 25 bits): random, but enumerable, so the
+  code alone is no longer treated as a bearer token.
+- **Forms say it plainly.** Checkout and reservation forms carry "This is a
+  demo. Please don't enter real personal details."
+- **Portal sessions do not widen access.** The portal handoff does verify a
+  signed token (RS256 against the portal JWKS, issuer and audience checked)
+  before minting `hb_session`, but nothing reads that session to authorize
+  the admin views today, so there was no staff path to preserve and none was
+  added. Gating `/admin` on a portal staff role remains a separate call.
+- **Stripe test keys only.** `src/lib/stripe-mode.ts` refuses any
+  `STRIPE_SECRET_KEY` that does not start with `sk_test_`, and any
+  `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` that is set but does not start with
+  `pk_test_`. `getStripe()` throws and checkout answers 503 in that state;
+  the server logs the refusal at boot (`instrumentation-node.ts`). The server
+  still starts, so the rest of the demo stays up. The webhook route is
+  unchanged (D-015).
+- **24h retention.** `purgeExpiredVisitorData` (`src/lib/retention.ts`)
+  deletes visitor-tagged rows older than 24 hours; seed rows are never
+  touched. It runs when the server opens the database at boot and then at
+  most hourly, triggered from `getDb()`. `npm run db:purge-visitors` runs it
+  on request (`DRY_RUN=1` to count only). Legacy NULL rows are only removed
+  with `INCLUDE_LEGACY=1`, an explicit operator decision.

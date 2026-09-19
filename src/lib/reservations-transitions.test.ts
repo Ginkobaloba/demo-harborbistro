@@ -19,8 +19,8 @@ function make(
 ): void {
   db.prepare(
     `INSERT INTO reservations
-       (id, name, phone, party_size, reserved_date, reserved_time, status)
-     VALUES (?, 'Guest', '555-0200', 2, ?, ?, ?)`,
+       (id, name, phone, party_size, reserved_date, reserved_time, status, visitor_id)
+     VALUES (?, 'Guest', '555-0200', 2, ?, ?, ?, 'seed')`,
   ).run(id, date, time, status);
 }
 
