@@ -3,10 +3,13 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
+import { assertFreshBuild } from "./fresh-build";
 
 /**
  * Starts the BUILT standalone server (the same `server.js` the container
- * runs) for the real-server suites. Needs a fresh `npm run build`.
+ * runs) for the real-server suites. Refuses to start against a stale build:
+ * `assertFreshBuild` (D-019) checks the build's recorded git sha against the
+ * current checkout before anything is spawned.
  */
 export const ROOT = path.resolve(__dirname, "..", "..");
 export const SERVER = path.join(ROOT, ".next", "standalone", "server.js");
@@ -69,6 +72,7 @@ export async function startServer(
   env: Record<string, string>,
   unset: string[] = [],
 ): Promise<RunningServer> {
+  assertFreshBuild(ROOT);
   if (!fs.existsSync(SERVER)) {
     throw new Error(`No standalone build at ${SERVER}. Run \`npm run build\` first.`);
   }

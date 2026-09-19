@@ -454,3 +454,44 @@ mirrors demo-slatewell D-016 so both demos share one design.
   real-server suite `test/server/visitor-cookie.server.test.ts` against the
   built standalone server, restarted without the secret for the fail-closed
   cases.
+
+## D-019: The real-server suite refuses a stale build (2026-09-19)
+
+`test/server/harness.ts` and `test/server/body-caps.server.test.ts` start
+`.next/standalone/server.js`, the built standalone server, and talk raw HTTP
+to it. Both files carried a comment saying they need a fresh `npm run
+build`, but a comment is not a check: nothing stopped the suite from
+starting a server built from an older commit, or from a dirty tree, and
+reporting green (or a misleading red) against code that was not the
+checkout. This is the same false-green class identified across the demo
+fleet: a test or deploy path that reuses an existing build directory with
+no check that the build matches the checkout.
+
+- **Build stamp.** `scripts/build-stamp.mjs` runs as `postbuild` (after
+  `npm run build` finishes) and writes `.next/BUILD_STAMP.json`: the git
+  HEAD sha, whether the working tree was dirty at build time, and a build
+  timestamp. `prebuild` deletes any existing stamp first, so a `next build`
+  that fails partway through can never leave a stamp claiming a fresher
+  build than actually happened. Inside the Docker build stage, `.git` is
+  excluded by `.dockerignore` on purpose (D-004 lineage); `build-stamp.mjs`
+  catches that and records `sha: null` with a reason instead of failing the
+  image build. The deploy image never runs this suite, so that is fine; a
+  null sha is refused by the check below, which is the correct default for
+  unknown provenance.
+- **The check.** `test/server/fresh-build.ts` exports `assertFreshBuild`,
+  called at the top of `startServer` (harness.ts) and the `beforeAll` in
+  `body-caps.server.test.ts`, before either spawns a server. It throws when:
+  the stamp file is missing (`no build stamp: run npm run build`); the
+  stamp has no usable sha (git was unavailable when it was written); the
+  stamp's sha does not match the current `git rev-parse HEAD` (`stale
+  build: build is from <sha>, checkout is <sha>. Run npm run build.`,
+  naming both shas -- a bare "stale build" with no shas is exactly as
+  unhelpful as a check that just says "0 entries"); or the tree was dirty
+  at build time, or is dirty now. **Dirty fails rather than warns**: the
+  sha comparison only means something when both trees are clean, so a dirty
+  build (or a dirty checkout since) has no sha that actually describes it,
+  and a suite that "passes with a warning" against unknown code is the same
+  false green this decision exists to close.
+- **Verification.** Proved by hand per the PR: build, run `npm run
+  test:server`, confirm green; commit a change without rebuilding, confirm
+  the suite fails and names both shas; rebuild, confirm green again.
