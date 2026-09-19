@@ -4,6 +4,13 @@ import {
   createReservation,
   slotsForDate,
 } from "@/lib/reservations";
+import {
+  BODY_LIMITS,
+  FIELD_LIMITS,
+  asRecord,
+  readJsonBody,
+  textField,
+} from "@/lib/request-body";
 import { visitorCookieAttributes, visitorIdForWrite } from "@/lib/visitor";
 
 /** GET /api/reservations?date=YYYY-MM-DD -> { slots: string[], isClosed: boolean } */
@@ -23,18 +30,35 @@ export async function GET(req: NextRequest) {
 /**
  * POST /api/reservations
  * Body: { name, phone, email?, partySize, date, time, notes? }
- * Returns: { id: string } (201) or { error: string } (400/409)
+ * Returns: { id: string } (201) or { error: string } (400/409, 413 when the
+ * body is over BODY_LIMITS.reservation). Free-text fields are capped by
+ * FIELD_LIMITS (D-017).
  */
 export async function POST(req: NextRequest) {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const read = await readJsonBody(req, BODY_LIMITS.reservation);
+  if (!read.ok) {
+    return NextResponse.json({ error: read.error }, { status: read.status });
+  }
+  const body = asRecord(read.body);
+  if (!body) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { name, phone, email, partySize, date, time, notes } =
-    body as Record<string, unknown>;
+  const { partySize, date, time } = body;
+  const fields = {
+    name: textField(body.name, "Name", FIELD_LIMITS.name),
+    phone: textField(body.phone, "Phone", FIELD_LIMITS.phone),
+    email: textField(body.email, "Email", FIELD_LIMITS.email),
+    notes: textField(body.notes, "Notes", FIELD_LIMITS.notes),
+  };
+  for (const field of Object.values(fields)) {
+    if (!field.ok) return NextResponse.json({ error: field.error }, { status: 400 });
+  }
+  const value = (f: (typeof fields)[keyof typeof fields]) => (f.ok ? f.value : "");
+  const name = value(fields.name);
+  const phone = value(fields.phone);
+  const email = value(fields.email);
+  const notes = value(fields.notes);
 
   if (!name || !phone || !partySize || !date || !time) {
     return NextResponse.json(
@@ -68,13 +92,13 @@ export async function POST(req: NextRequest) {
   const visitor = visitorIdForWrite(req);
 
   const reservation = createReservation({
-    name: String(name),
-    phone: String(phone),
-    email: email ? String(email) : null,
+    name,
+    phone,
+    email: email || null,
     partySize: Number(partySize),
     date: String(date),
     time: String(time),
-    notes: notes ? String(notes) : null,
+    notes: notes || null,
     visitorId: visitor.visitorId,
   });
 

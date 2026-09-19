@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { RESTAURANT } from "@/lib/restaurant";
 import { DemoDataNotice } from "@/components/site/DemoDataNotice";
+import { FIELD_LIMITS } from "@/lib/request-body";
 
 const PARTY_SIZES = Array.from({ length: 12 }, (_, i) => i + 1);
 
@@ -195,6 +196,7 @@ export default function ReservationsPage() {
               type="text"
               required
               value={name}
+              maxLength={FIELD_LIMITS.name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Full name"
               className={inputClass}
@@ -211,6 +213,7 @@ export default function ReservationsPage() {
               type="tel"
               required
               value={phone}
+              maxLength={FIELD_LIMITS.phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="(555) 000-0000"
               className={inputClass}
@@ -227,6 +230,7 @@ export default function ReservationsPage() {
               id="email"
               type="email"
               value={email}
+              maxLength={FIELD_LIMITS.email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               className={inputClass}
@@ -243,6 +247,7 @@ export default function ReservationsPage() {
               id="notes"
               rows={3}
               value={notes}
+              maxLength={FIELD_LIMITS.notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Allergies, celebrations, accessibility needs..."
               className={`${inputClass} resize-none`}

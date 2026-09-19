@@ -293,3 +293,91 @@ see.
   most hourly, triggered from `getDb()`. `npm run db:purge-visitors` runs it
   on request (`DRY_RUN=1` to count only). Legacy NULL rows are only removed
   with `INCLUDE_LEGACY=1`, an explicit operator decision.
+
+## D-017: Checkout writes the order only after Stripe; public writes are size-capped (2026-09-19)
+
+A deep verify of #28 found two pre-existing defects: with Stripe unreachable,
+`POST /api/checkout` answered a bare 500 with an empty body and left a tagged
+`pending` order row behind; and nothing capped a public request body, so a
+1 MB reservation name was stored.
+
+- **Order row after the session, not before.** better-sqlite3 transactions are
+  synchronous and cannot span the `await` on Stripe, so "roll back on
+  failure" would really be a compensating delete. Instead checkout mints the
+  order id first (`unusedOrderId()`, which also checks the id is free), opens
+  the Stripe session with it (client reference, metadata, success/cancel
+  URLs), and only then inserts the `pending` row with the session id in the
+  same statement. Any failure in session creation, including a session with
+  no hosted URL, returns 503 with a fixed JSON message and writes nothing.
+  The log line carries only the Stripe error type/code, never the message.
+  If the insert itself fails after Stripe succeeded, the client gets a JSON
+  500 and the unused test-mode session expires on its own. No webhook can
+  reference the order before the row exists: payment only starts after the
+  client is redirected, which happens after the insert.
+- **Byte caps on every public write route** via `readJsonBody`
+  (`src/lib/request-body.ts`): checkout 32 KB, reservations 8 KB, admin
+  actions 1 KB, portal handoff 16 KB. A declared `Content-Length` over the
+  cap is refused up front, and the stream is counted as it is read so a
+  chunked upload is cut off at the cap. Over the cap is 413; unparseable or
+  non-object JSON is 400. (An understated `Content-Length` never reaches the
+  counter on a real server: Node's HTTP framing stops at the declared length,
+  so the handler sees truncated JSON and answers 400.) The Stripe webhook is
+  untouched: it must read the exact raw body for signature verification
+  (D-015) and stores no visitor text.
+- **Middleware no longer runs on `/api/`.** The first cut of this decision
+  capped bodies in the handlers only, and the #31 deep verify showed it did
+  not work on a real server: when middleware runs on a request with a body,
+  Next 15.5 clones and buffers the whole upload (up to
+  `middlewareClientMaxBodySize`, default 10 MB) and waits for it to end
+  before the route handler starts. An endless chunked upload hung, a
+  declared 1 MB got no early 413, and memory climbed under concurrent 9 MB
+  uploads. The matcher now skips `api/`. Nothing under `/api/` needed it:
+  the write routes mint and set `hb_visitor` themselves
+  (`visitorIdForWrite`), and the reads use the cookie the browser already
+  holds from the pages (seed-only scope without one). As defence in depth,
+  `experimental.middlewareClientMaxBodySize` is `64kb`.
+- **Proven against the built server, not just the handlers.**
+  `test/server/body-caps.server.test.ts` starts `.next/standalone/server.js`
+  (what the container runs) and sends raw HTTP: a declared 1 MB body gets 413
+  in well under a second, an endless chunked upload gets 413 at the cap, the
+  exact-cap body is accepted, and pages still get the visitor cookie while
+  `/api/` does not. It needs a fresh build, so it has its own config:
+  `npm run build` then `npx vitest run --config vitest.server.config.ts`.
+  With the old matcher, the upload cases time out (no response in 10 s).
+- **Stripe fails fast.** The client is built with a 10 s timeout and one
+  retry (`STRIPE_CLIENT_OPTIONS`), about 21 s worst case, so a hung Stripe
+  yields checkout's own 503 inside the proxy's 60 s read timeout instead of
+  a 504 after about 241 s.
+- **Tips are validated, not coerced, against a limit that scales.** The
+  rules live in `src/lib/tip.ts` (pure, shared by the route and the order
+  form). `tipCents` must be a JSON number that is a non-negative integer no
+  larger than `maxTipCents(subtotal)` = max($1,000, 100% of the
+  server-priced subtotal); absent or null means no tip. Booleans, strings,
+  arrays and fractions are 400 (they used to be coerced, and 1e20 was
+  forwarded to Stripe). A first cut used a flat $1,000 cap, and the #31
+  re-verify showed it broke the form: its default 18% preset 400'd on any
+  subtotal over about $5,556 (reproduced at $6,120). The form now computes
+  presets with `presetTipCents`, which is clamped to the same limit, so a
+  preset can never produce a tip the server refuses (unit-tested across
+  subtotals up to $500,000). Multi-select add-on ids are de-duplicated, so a
+  repeated add-on is charged once.
+- **Over-cap uploads: 413, then the stream is closed at once.** When the
+  counter trips, `readJsonBody` cancels the body stream immediately and the
+  route answers 413. A client that is still writing may therefore see a TCP
+  reset instead of reading the 413 (the #31 round-3 re-verify measured
+  about 6% of over-cap uploads). That is accepted. A round-3 attempt to
+  soften it by reading and discarding a bounded amount more (64 KB / 50 ms)
+  was removed: its timed-out pending read made the stream cancel wait for
+  more bytes, so a sender that crossed the cap by less than 64 KB and then
+  stalled got no 413 at all (held 301 s, then 408), endless uploads slowed
+  from about 7 ms to about 510 ms, and resets did not go down. The real-
+  server suite now includes that stalled-sender case (413 in under 1 s on
+  `/api/reservations` and `/api/checkout`).
+- **Every failure before the response is JSON.** Minting the order id
+  (`unusedOrderId`) is now wrapped in a try that returns the same JSON 500
+  as a failed insert, before Stripe is called.
+- **Field limits** (`FIELD_LIMITS`): name 100, phone 32, email 254, address
+  300, notes 500 characters, measured after trimming in UTF-16 units, the
+  same unit as the forms' `maxLength` (which now mirror them). Non-string
+  values are refused rather than stringified. Carts are limited to
+  `MAX_CART_LINES` (50) lines.

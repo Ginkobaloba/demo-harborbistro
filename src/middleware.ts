@@ -33,8 +33,15 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Skip static assets; every page and API route gets a visitor id.
+  // Every page gets a visitor id. Skipped: static assets, and every /api/
+  // route (D-017). When middleware runs on a request with a body, Next.js
+  // buffers the whole upload (up to middlewareClientMaxBodySize) and waits
+  // for it to END before the route handler starts, which defeats the routes'
+  // streaming byte cap (readJsonBody). The API routes do not need it: the
+  // write routes mint and set hb_visitor themselves (visitorIdForWrite), and
+  // the reads use the cookie the browser already holds from the pages,
+  // falling back to seed-only scope without one.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)$).*)",
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)$).*)",
   ],
 };
