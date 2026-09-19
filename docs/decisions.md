@@ -454,3 +454,39 @@ mirrors demo-slatewell D-016 so both demos share one design.
   real-server suite `test/server/visitor-cookie.server.test.ts` against the
   built standalone server, restarted without the secret for the fail-closed
   cases.
+
+## D-019: Bound the hb_session lifetime by value, not just presence (2026-09-19)
+
+Fleet audit `AUDIT_JWT_REQUIRED_CLAIMS_2026-09-19.md` (finding #3): jose's
+`jwtVerify` validates `exp`, `iat`, and `nbf` only when the claim is
+present, so a hand-signed `hb_session` token that simply omits `exp` was
+never rejected by the signature check alone. `mintHarborSession` always
+sets `sub`, `iat`, and `exp`, but anyone holding `SESSION_SECRET` could
+sign a token by hand, and `verifyHarborSession` has to refuse it
+regardless.
+
+`verifyHarborSession` now passes `requiredClaims: ["sub", "iat", "exp"]`
+and `maxTokenAge: SESSION_TTL_SECONDS` (the same 12-hour constant
+`mintHarborSession` uses), plus an explicit post-verify check that `exp`
+and `iat` are integers and `exp - iat` is positive and no greater than
+the TTL, mirroring demo-slatewell's `admin-session.ts` (#38, #39). No
+`jti` requirement: `mintHarborSession` does not mint one, and adding it
+to `requiredClaims` without also minting it would reject every real
+session. No `issuer`/`audience` check for the same reason: neither is
+set at mint time.
+
+Mutation check, both layers: deleting only the `requiredClaims` line does
+not turn any of the 15 hand-signed tests red (0/15), because the
+post-verify `typeof` guards already reject an absent `sub`, `exp`, or
+`iat` independent of `requiredClaims` -- in this codebase, `requiredClaims`
+is belt-and-suspenders with the shape checks, not the sole gate. Deleting
+the explicit `exp - iat` bound block instead (keeping `requiredClaims` and
+`maxTokenAge`) turns 4/15 red: exp a century out, fractional exp,
+fractional iat (isolated from the future-iat case), and a lifetime one
+hour over the 12-hour TTL. `maxTokenAge` bounds `iat` against "now" but
+never relates it to `exp`, so those four shapes pass jose's own checks
+and are caught only by the explicit bound.
+
+No clock tolerance added: mint and verify share a process clock, so
+there is no skew to absorb, and nothing else in this codebase uses
+`clockTolerance`.
