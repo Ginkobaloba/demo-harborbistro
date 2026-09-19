@@ -3,9 +3,12 @@ import { defineConfig } from "vitest/config";
 /**
  * Real-server suite (D-017): starts the built standalone server and talks
  * raw HTTP to it. Kept out of the default `vitest run` because it needs a
- * fresh `npm run build` first. Run:
+ * fresh `npm run build` first. Every file in this suite calls
+ * `assertFreshBuild` (test/server/fresh-build.ts, D-020) before starting a
+ * server, and fails fast, naming both shas, when the build in
+ * `.next/BUILD_STAMP.json` does not match the current checkout. Run:
  *   npm run build
- *   npx vitest run --config vitest.server.config.ts
+ *   npm run test:server
  */
 export default defineConfig({
   test: {

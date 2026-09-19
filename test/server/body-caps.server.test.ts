@@ -6,17 +6,19 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { assertFreshBuild } from "./fresh-build";
 
 /**
  * Real-server proof of the D-017 byte cap. The unit tests call the route
  * handlers directly, which cannot see what Next.js does in front of them
  * (the #31 deep verify found middleware buffering whole uploads). This suite
  * starts the BUILT standalone server, the same `server.js` the container
- * runs, and talks raw HTTP to it.
+ * runs, and talks raw HTTP to it. `assertFreshBuild` (D-020) refuses to
+ * start it against a build that does not match the current checkout.
  *
- * Run (needs a fresh build of the current tree):
+ * Run:
  *   npm run build
- *   npx vitest run --config vitest.server.config.ts
+ *   npm run test:server
  */
 const ROOT = path.resolve(__dirname, "..", "..");
 const SERVER = path.join(ROOT, ".next", "standalone", "server.js");
@@ -186,6 +188,7 @@ function nextSaturday(): string {
 }
 
 beforeAll(async () => {
+  assertFreshBuild(ROOT);
   if (!fs.existsSync(SERVER)) {
     throw new Error(`No standalone build at ${SERVER}. Run \`npm run build\` first.`);
   }
