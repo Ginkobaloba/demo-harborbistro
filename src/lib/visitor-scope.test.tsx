@@ -15,6 +15,9 @@ import type { ReactElement } from "react";
 const TMP = path.join(os.tmpdir(), `harbor-scope-${process.pid}.db`);
 process.env.HARBOR_DB_PATH = TMP;
 process.env.HARBOR_RETENTION_DISABLED = "1";
+// The visitor cookie is signed (D-018).
+const SECRET = "s".repeat(48);
+process.env.SESSION_SECRET = SECRET;
 
 // Server components read the visitor cookie through next/headers. Outside a
 // Next.js request there is no cookie store, so the test supplies one: set
@@ -42,7 +45,11 @@ vi.mock("@/components/order/OrderTracker", () => ({ OrderTracker: () => null }))
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
-const cookieFor = (id: string) => `other=1; hb_visitor=${id}`;
+// Signed cookie values, filled in beforeAll (signing is async).
+const signed: Record<string, string> = {};
+const cookieFor = (id: string) => `other=1; hb_visitor=${signed[id]}`;
+/** The pre-D-018 cookie: a bare, unsigned id. */
+const unsignedCookieFor = (id: string) => `other=1; hb_visitor=${id}`;
 
 let db: Database.Database;
 let today: string;
@@ -99,6 +106,8 @@ beforeAll(async () => {
     fs.rmSync(`${TMP}${suffix}`, { force: true });
   }
   db = (await import("./db")).getDb();
+  const { signVisitorId } = await import("./visitor");
+  for (const id of [A, B]) signed[id] = (await signVisitorId(id))!;
   today = (await import("./reservations")).todayLocalDate();
 });
 
@@ -277,9 +286,146 @@ describe("create routes tag every record with the browser's visitor id", () => {
     const { id } = await res.json();
     const row = db.prepare("SELECT visitor_id FROM reservations WHERE id = ?").get(id) as { visitor_id: string };
     const setCookie = res.headers.get("set-cookie") ?? "";
-    expect(setCookie).toContain(`hb_visitor=${row.visitor_id}`);
+    expect(setCookie).toContain(`hb_visitor=${row.visitor_id}.`);
     expect(setCookie.toLowerCase()).toContain("httponly");
     expect(setCookie.toLowerCase()).toContain("samesite=lax");
+    // The database keeps the bare id; only the cookie carries the tag.
     expect(row.visitor_id).toMatch(/^[0-9a-f-]{36}$/);
+    const { verifyVisitorCookie } = await import("./visitor");
+    const value = setCookie.match(/hb_visitor=([^;]+)/)![1];
+    expect(await verifyVisitorCookie(value)).toBe(row.visitor_id);
+  });
+
+  it("never adopts an untrusted cookie's id: unsigned, B's tag on A's id, or tampered", async () => {
+    const { POST } = await import("@/app/api/reservations/route");
+    const { NextRequest } = await import("next/server");
+    const bTag = signed[B].split(".")[1];
+    for (const cookie of [
+      unsignedCookieFor(A),
+      `hb_visitor=${A}.${bTag}`,
+      `hb_visitor=${signed[A].slice(0, -1)}${signed[A].endsWith("A") ? "Q" : "A"}`,
+    ]) {
+      const res = await POST(new NextRequest(post("http://t/api/reservations", booking(), cookie)));
+      expect(res.status).toBe(201);
+      const { id } = await res.json();
+      const row = db.prepare("SELECT visitor_id FROM reservations WHERE id = ?").get(id) as { visitor_id: string };
+      expect(row.visitor_id).not.toBe(A);
+      expect(row.visitor_id).not.toBe(B);
+      const setCookie = res.headers.get("set-cookie") ?? "";
+      expect(setCookie).toContain(`hb_visitor=${row.visitor_id}.`);
+      // The new booking is invisible to the browser whose id the cookie claimed.
+      const { default: Page } = await import("@/app/admin/reservations/page");
+      const html = await asBrowser(cookieFor(A), () => render(Page));
+      expect(html).not.toContain(id);
+    }
+  });
+});
+
+describe("untrusted visitor cookies read as no visitor (D-018)", () => {
+  const untrusted = () =>
+    [
+      ["unsigned bare id", unsignedCookieFor(A)],
+      ["B's tag on A's id", `hb_visitor=${A}.${signed[B].split(".")[1]}`],
+      ["tampered tag", `hb_visitor=${signed[A].slice(0, 40)}${signed[A].slice(40).split("").reverse().join("")}`],
+    ] as const;
+
+  it("admin pages show seed data only", async () => {
+    const { default: Orders } = await import("@/app/admin/orders/page");
+    const { default: Reservations } = await import("@/app/admin/reservations/page");
+    for (const [label, cookie] of untrusted()) {
+      const orders = await asBrowser(cookie, () => render(Orders));
+      expect(orders, label).toContain("HB-SEED1");
+      expect(orders, label).not.toContain("HB-AAAA1");
+      expect(orders, label).not.toContain("Alice Visitor");
+      const res = await asBrowser(cookie, () => render(Reservations));
+      expect(res, label).toContain("HR-SEED1");
+      expect(res, label).not.toContain("Alice Booker");
+    }
+  });
+
+  it("detail pages and the order API are 404; admin actions are 404 and change nothing", async () => {
+    const { GET } = await import("@/app/api/orders/[id]/route");
+    const { POST: orderPost } = await import("@/app/api/admin/orders/[id]/route");
+    const { POST: resPost } = await import("@/app/api/admin/reservations/[id]/route");
+    const { default: Confirmation } = await import("@/app/order/confirmation/[id]/page");
+    const { default: Booking } = await import("@/app/reservations/[id]/page");
+    for (const [label, cookie] of untrusted()) {
+      expect((await GET(get("http://t/x", cookie), ctx("HB-AAAA1"))).status, label).toBe(404);
+      expect((await orderPost(post("http://t/x", { action: "advance" }, cookie), ctx("HB-AAAA1"))).status, label).toBe(404);
+      expect((await resPost(post("http://t/x", { status: "cancelled" }, cookie), ctx("HR-AAAA1"))).status, label).toBe(404);
+      const oProps = { params: Promise.resolve({ id: "HB-AAAA1" }), searchParams: Promise.resolve({}) };
+      await expect(asBrowser(cookie, () => render(() => Confirmation(oProps)))).rejects.toThrow(NOT_FOUND);
+      const rProps = { params: Promise.resolve({ id: "HR-AAAA1" }) };
+      await expect(asBrowser(cookie, () => render(() => Booking(rProps)))).rejects.toThrow(NOT_FOUND);
+    }
+    const order = db.prepare("SELECT status FROM orders WHERE id = 'HB-AAAA1'").get() as { status: string };
+    expect(order.status).toBe("received");
+    const booking = db.prepare("SELECT status FROM reservations WHERE id = 'HR-AAAA1'").get() as { status: string };
+    expect(booking.status).toBe("confirmed");
+  });
+});
+
+describe("no usable SESSION_SECRET (D-018)", () => {
+  async function withoutSecret<T>(fn: () => Promise<T>): Promise<T> {
+    delete process.env.SESSION_SECRET;
+    try {
+      return await fn();
+    } finally {
+      process.env.SESSION_SECRET = SECRET;
+    }
+  }
+
+  it("reads fall back to seed only, even with a formerly valid signed cookie", async () => {
+    const { default: Page } = await import("@/app/admin/orders/page");
+    const { GET } = await import("@/app/api/orders/[id]/route");
+    const { default: Booking } = await import("@/app/reservations/[id]/page");
+    await withoutSecret(async () => {
+      const html = await asBrowser(cookieFor(A), () => render(Page));
+      expect(html).toContain("HB-SEED1");
+      expect(html).not.toContain("HB-AAAA1");
+      expect((await GET(get("http://t/x", cookieFor(A)), ctx("HB-AAAA1"))).status).toBe(404);
+      expect((await GET(get("http://t/x", cookieFor(A)), ctx("HB-SEED1"))).status).toBe(200);
+      const rProps = { params: Promise.resolve({ id: "HR-AAAA1" }) };
+      await expect(asBrowser(cookieFor(A), () => render(() => Booking(rProps)))).rejects.toThrow(NOT_FOUND);
+    });
+  });
+
+  it("the reservation and checkout writes answer 503, store nothing and set no cookie", async () => {
+    const { POST: reserve } = await import("@/app/api/reservations/route");
+    const { POST: checkout } = await import("@/app/api/checkout/route");
+    const { NextRequest } = await import("next/server");
+    const { VISITOR_SIGNING_UNAVAILABLE } = await import("./visitor");
+    const count = (table: string) => (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c;
+    const reservationsBefore = count("reservations");
+    const ordersBefore = count("orders");
+    // A syntactically valid test key gets past the Stripe guard, so the
+    // visitor check is what answers (and it answers before any Stripe call).
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_local_only_not_a_real_key");
+    try {
+      await withoutSecret(async () => {
+        for (const cookie of [cookieFor(A), null]) {
+          const r = await reserve(
+            new NextRequest(
+              post("http://t/api/reservations", { name: "No Secret", phone: "555-0000", partySize: 2, date: today, time: "18:00" }, cookie),
+            ),
+          );
+          expect(r.status).toBe(503);
+          expect(await r.json()).toEqual({ error: VISITOR_SIGNING_UNAVAILABLE });
+          expect(r.headers.get("set-cookie")).toBeNull();
+          const c = await checkout(
+            new NextRequest(
+              post("http://t/api/checkout", { lines: [], customerName: "No Secret", customerPhone: "555-0000", fulfillment: "pickup" }, cookie),
+            ),
+          );
+          expect(c.status).toBe(503);
+          expect(await c.json()).toEqual({ error: VISITOR_SIGNING_UNAVAILABLE });
+          expect(c.headers.get("set-cookie")).toBeNull();
+        }
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(count("reservations")).toBe(reservationsBefore);
+    expect(count("orders")).toBe(ordersBefore);
   });
 });

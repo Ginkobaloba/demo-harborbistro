@@ -26,7 +26,7 @@ export const runtime = "nodejs";
  */
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const scope = scopeFromRequest(req);
+  const scope = await scopeFromRequest(req);
   const read = await readJsonBody(req, BODY_LIMITS.adminAction);
   if (!read.ok) {
     return NextResponse.json({ error: read.error }, { status: read.status });

@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 import { cookies } from "next/headers";
+import { requireSessionSecret } from "./session-secret";
 
 /**
  * App-side session (chunk 4b).
@@ -24,13 +25,8 @@ export interface HarborSessionPayload extends JWTPayload {
 }
 
 function getSecret(): Uint8Array {
-  const raw = process.env.SESSION_SECRET;
-  if (!raw || raw.length < 32) {
-    throw new Error(
-      "SESSION_SECRET must be set to a value of at least 32 characters",
-    );
-  }
-  return new TextEncoder().encode(raw);
+  // Same rule as the signed visitor cookie (session-secret.ts, D-018).
+  return requireSessionSecret();
 }
 
 /**

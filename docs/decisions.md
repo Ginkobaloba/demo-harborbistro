@@ -381,3 +381,76 @@ A deep verify of #28 found two pre-existing defects: with Stripe unreachable,
   same unit as the forms' `maxLength` (which now mirror them). Non-string
   values are refused rather than stringified. Carts are limited to
   `MAX_CART_LINES` (50) lines.
+
+## D-018: The visitor cookie is signed (2026-09-19)
+
+`hb_visitor` (D-016) was a random v4 UUID, HttpOnly, but unsigned, so its
+value alone was a bearer token: anyone who learned a visitor's id (a shared
+screenshot of devtools, a log line, a proxy) could set it and get that
+visitor's scope in the admin views and on the confirmation pages. This
+mirrors demo-slatewell D-016 so both demos share one design.
+
+- **Format.** `hb_visitor=<v4 uuid>.<43 char base64url tag>`, where
+  `tag = HMAC-SHA-256(visitorKey, uuid)`. The database keeps the bare id, so
+  no migration and no change to the data layer's scope predicate.
+- **Key derivation and domain separation.** `visitorKey =
+  HMAC-SHA-256(SESSION_SECRET, "harborbistro:visitor-cookie:v1")`. The
+  portal `hb_session` JWT stays keyed by the raw secret, so a visitor tag and
+  a session signature are always computed under different keys, and the
+  label differs from slatewell's, so a tag from one demo never verifies on
+  the other even under a shared secret. The version in the label lets a
+  future format change retire every old cookie at once. Web Crypto only
+  (`crypto.subtle`, in `src/lib/visitor.ts`), because the Edge middleware
+  verifies it too.
+- **Verification.** `crypto.subtle.verify` (constant-time), after a strict
+  shape check (lower-case v4 UUID, one dot, exactly 43 base64url chars), and
+  only the canonical base64url spelling of the tag is accepted: the last
+  character carries 2 spare bits, which would otherwise let a second
+  spelling of the same tag verify.
+- **Untrusted cookies are never trusted, only replaced.** An unsigned,
+  tampered, malformed, or foreign-secret cookie (including another
+  visitor's valid tag on this visitor's id) reads as "no visitor". Read
+  paths treat it that way: the admin pages show seed data only, the admin
+  POST APIs and `/api/orders/[id]` answer 404, and `/order/confirmation/[id]`
+  and `/reservations/[id]` 404. Write paths (the middleware on page views,
+  `POST /api/reservations`, `POST /api/checkout`) mint a fresh signed visitor
+  instead of adopting the claimed id (`visitorIdForWrite`). `/api/` still
+  skips the middleware (D-017), so the routes verify on their own with the
+  same module.
+- **Existing cookies become new visitors.** Every pre-D-018 cookie is a bare
+  UUID, so after deploy each browser gets a new visitor id on its next page
+  view and loses sight of its earlier demo orders and bookings. Accepted:
+  visitor data expires within a day anyway (D-016 retention), it is demo
+  data, and grandfathering unsigned ids would keep the bearer-token hole
+  open.
+- **No usable SESSION_SECRET: fail closed, like the rest of harbor.** The
+  rule is the one the portal session already used (set, at least 32
+  characters), now in one place (`src/lib/session-secret.ts`, shared by
+  `portal-session.ts`), plus the published `.env.example` placeholder is
+  refused by name. Without it nothing can be signed or verified, and a
+  visitor cookie would be a bearer token again, so: `POST /api/reservations`
+  and `POST /api/checkout` answer 503 ("Online ordering and reservations are
+  temporarily unavailable in this environment.") before reading the body
+  and before any Stripe call, so no row and no Stripe session is ever
+  created; pages still render but the middleware sets no cookie; every read
+  is seed-only, so detail pages 404; the server logs the problem once at
+  boot, naming the rule and never the value. This matches D-015 (webhook
+  503 without its secret), D-016 (checkout 503 without a test key) and the
+  portal handoff (which already threw without the secret). The alternative,
+  a random per-process key when the secret is missing, was rejected: it
+  silently logs every visitor out on each restart and hides a
+  misconfiguration that should be loud.
+- **Deploy gate.** `SESSION_SECRET` changes from "portal sign-in only" to
+  "required for ordering and reservations". The production env must set a
+  32+ character random value before this ships, or both write paths 503.
+  README and `.env.example` say so.
+- **Verification.** `src/lib/visitor.test.ts` (format against an independent
+  node:crypto computation; tampered, unsigned, B's tag on A's id,
+  non-canonical final character, foreign secret, raw secret without the
+  label, another label, malformed; fail closed for missing, empty, short and
+  placeholder secrets), `src/middleware.test.ts`, `src/lib/visitor-scope.test.tsx`
+  (the PR #28 two-browser guarantees with signed cookies, plus untrusted
+  cookies on every read and write path and the no-secret 503s), and the
+  real-server suite `test/server/visitor-cookie.server.test.ts` against the
+  built standalone server, restarted without the secret for the fail-closed
+  cases.

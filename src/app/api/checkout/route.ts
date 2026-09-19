@@ -18,7 +18,12 @@ import {
   readJsonBody,
   textField,
 } from "@/lib/request-body";
-import { visitorCookieAttributes, visitorIdForWrite } from "@/lib/visitor";
+import {
+  VISITOR_SIGNING_UNAVAILABLE,
+  isVisitorSigningConfigured,
+  visitorCookieAttributes,
+  visitorIdForWrite,
+} from "@/lib/visitor";
 import type { Fulfillment } from "@/lib/types";
 
 // better-sqlite3 and the Stripe SDK both need the Node.js runtime.
@@ -50,7 +55,8 @@ const PAYMENT_UNAVAILABLE =
  * opens a Stripe Checkout Session, and only then persists the pending order
  * (D-017), returning the hosted-checkout URL. Returns { url, orderId } (200)
  * or { error } (400 bad input, 413 body over the cap, 503 Stripe unavailable
- * or not configured). A 503 from Stripe leaves no order row.
+ * or not configured, or SESSION_SECRET unusable so no visitor can be signed,
+ * D-018). A 503 leaves no order row and no Stripe session.
  */
 export async function POST(req: NextRequest) {
   const stripeMode = checkStripeTestMode(process.env);
@@ -65,6 +71,12 @@ export async function POST(req: NextRequest) {
       },
       { status: 503 },
     );
+  }
+
+  // No usable SESSION_SECRET: no visitor can be signed, so the order could
+  // never be found again. Refuse before any Stripe work (D-018).
+  if (!isVisitorSigningConfigured()) {
+    return NextResponse.json({ error: VISITOR_SIGNING_UNAVAILABLE }, { status: 503 });
   }
 
   const read = await readJsonBody(req, BODY_LIMITS.checkout);
@@ -128,7 +140,13 @@ export async function POST(req: NextRequest) {
 
   // Tag the order with this browser's visitor id so only this browser (and
   // no other visitor) can see it in the admin views and confirmation (D-016).
-  const visitor = visitorIdForWrite(req);
+  // An unsigned or tampered cookie is never adopted: a fresh signed visitor
+  // is minted instead (D-018). Resolved before the Stripe call, so a refusal
+  // here never strands a session.
+  const visitor = await visitorIdForWrite(req);
+  if (!visitor.ok) {
+    return NextResponse.json({ error: VISITOR_SIGNING_UNAVAILABLE }, { status: 503 });
+  }
 
   // The order row is written only AFTER Stripe hands back a session (D-017).
   // The id is minted first because the session needs it (client reference,
@@ -220,8 +238,8 @@ export async function POST(req: NextRequest) {
   }
 
   const res = NextResponse.json({ url: session.url, orderId: order.id });
-  if (visitor.minted) {
-    res.cookies.set({ ...visitorCookieAttributes(), value: visitor.visitorId });
+  if (visitor.cookieValue) {
+    res.cookies.set({ ...visitorCookieAttributes(), value: visitor.cookieValue });
   }
   return res;
 }

@@ -204,6 +204,9 @@ beforeAll(async () => {
       STRIPE_SECRET_KEY: "sk_test_server_suite_placeholder",
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "",
       NEXT_TELEMETRY_DISABLED: "1",
+      // The signed visitor cookie needs a usable secret, or every public
+      // write is 503 (D-018). Test-only value.
+      SESSION_SECRET: "server-suite-secret-".padEnd(48, "x"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -275,7 +278,7 @@ describe("byte cap on the real standalone server", () => {
       time: "18:00",
     });
     expect(r.status).toBe(201);
-    expect(String(r.headers["set-cookie"] ?? "")).toMatch(/hb_visitor=[0-9a-f-]{36}/);
+    expect(String(r.headers["set-cookie"] ?? "")).toMatch(/hb_visitor=[0-9a-f-]{36}\.[A-Za-z0-9_-]{43};/);
     expect(reservationRows()).toBe(1);
   });
 

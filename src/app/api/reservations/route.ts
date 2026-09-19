@@ -11,7 +11,12 @@ import {
   readJsonBody,
   textField,
 } from "@/lib/request-body";
-import { visitorCookieAttributes, visitorIdForWrite } from "@/lib/visitor";
+import {
+  VISITOR_SIGNING_UNAVAILABLE,
+  isVisitorSigningConfigured,
+  visitorCookieAttributes,
+  visitorIdForWrite,
+} from "@/lib/visitor";
 
 /** GET /api/reservations?date=YYYY-MM-DD -> { slots: string[], isClosed: boolean } */
 export async function GET(req: NextRequest) {
@@ -32,9 +37,13 @@ export async function GET(req: NextRequest) {
  * Body: { name, phone, email?, partySize, date, time, notes? }
  * Returns: { id: string } (201) or { error: string } (400/409, 413 when the
  * body is over BODY_LIMITS.reservation). Free-text fields are capped by
- * FIELD_LIMITS (D-017).
+ * FIELD_LIMITS (D-017). 503 when SESSION_SECRET is unusable, since no
+ * visitor can be signed and the booking could never be found again (D-018).
  */
 export async function POST(req: NextRequest) {
+  if (!isVisitorSigningConfigured()) {
+    return NextResponse.json({ error: VISITOR_SIGNING_UNAVAILABLE }, { status: 503 });
+  }
   const read = await readJsonBody(req, BODY_LIMITS.reservation);
   if (!read.ok) {
     return NextResponse.json({ error: read.error }, { status: read.status });
@@ -88,8 +97,13 @@ export async function POST(req: NextRequest) {
   }
 
   // Tag the booking with this browser's visitor id so no other visitor can
-  // see it in the admin views or on its confirmation page (D-016).
-  const visitor = visitorIdForWrite(req);
+  // see it in the admin views or on its confirmation page (D-016). An
+  // unsigned or tampered cookie is never adopted: a fresh signed visitor is
+  // minted instead (D-018).
+  const visitor = await visitorIdForWrite(req);
+  if (!visitor.ok) {
+    return NextResponse.json({ error: VISITOR_SIGNING_UNAVAILABLE }, { status: 503 });
+  }
 
   const reservation = createReservation({
     name,
@@ -103,8 +117,8 @@ export async function POST(req: NextRequest) {
   });
 
   const res = NextResponse.json({ id: reservation.id }, { status: 201 });
-  if (visitor.minted) {
-    res.cookies.set({ ...visitorCookieAttributes(), value: visitor.visitorId });
+  if (visitor.cookieValue) {
+    res.cookies.set({ ...visitorCookieAttributes(), value: visitor.cookieValue });
   }
   return res;
 }

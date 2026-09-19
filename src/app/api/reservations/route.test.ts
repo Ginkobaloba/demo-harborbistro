@@ -13,6 +13,8 @@ import { NextRequest } from "next/server";
 const TMP = path.join(os.tmpdir(), `harbor-reservations-${process.pid}.db`);
 process.env.HARBOR_DB_PATH = TMP;
 process.env.HARBOR_RETENTION_DISABLED = "1";
+// The visitor cookie is signed (D-018); without a usable secret every write is 503.
+process.env.SESSION_SECRET = "t".repeat(48);
 
 const VISITOR = "44444444-4444-4444-8444-444444444444";
 
@@ -21,6 +23,7 @@ type Limits = typeof import("@/lib/request-body");
 let route: RouteModule;
 let limits: Limits;
 let db: Database.Database;
+let signedVisitor: string;
 let saturday: string;
 
 /** A Saturday one to two weeks out: open, with an 18:00 slot. */
@@ -51,7 +54,7 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
 function reserve(body: unknown, raw?: string): NextRequest {
   return new NextRequest("http://localhost/api/reservations", {
     method: "POST",
-    headers: { "content-type": "application/json", cookie: `hb_visitor=${VISITOR}` },
+    headers: { "content-type": "application/json", cookie: `hb_visitor=${signedVisitor}` },
     body: raw ?? JSON.stringify(body),
   });
 }
@@ -61,6 +64,7 @@ beforeAll(async () => {
     fs.rmSync(`${TMP}${suffix}`, { force: true });
   }
   db = (await import("@/lib/db")).getDb();
+  signedVisitor = (await (await import("@/lib/visitor")).signVisitorId(VISITOR))!;
   route = await import("./route");
   limits = await import("@/lib/request-body");
   saturday = nextSaturday();
