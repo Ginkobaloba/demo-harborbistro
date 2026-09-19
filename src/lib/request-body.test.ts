@@ -31,44 +31,6 @@ describe("readJsonBody", () => {
     expect(r).toMatchObject({ ok: false, status: 413 });
   });
 
-  it("after the cap, discards only a bounded amount of an endless upload, then stops", async () => {
-    const { DRAIN_MAX_BYTES } = await import("./request-body");
-    let pulledBytes = 0;
-    const chunk = new Uint8Array(1024).fill(0x78);
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pulledBytes += chunk.byteLength;
-        controller.enqueue(chunk);
-      },
-    });
-    const req = new Request("http://localhost/x", { method: "POST", body, duplex: "half" } as RequestInit);
-    const started = Date.now();
-    const r = await readJsonBody(req, 4096);
-    expect(r).toMatchObject({ ok: false, status: 413 });
-    expect(Date.now() - started).toBeLessThan(1000);
-    // cap + drain bound + a little stream read-ahead, not "everything".
-    expect(pulledBytes).toBeLessThan(4096 + DRAIN_MAX_BYTES + 16 * 1024);
-  });
-
-  it("does not let a stalled sender hold the 413 back past the drain time bound", async () => {
-    let sent = false;
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        if (!sent) {
-          sent = true;
-          controller.enqueue(new Uint8Array(8192).fill(0x78));
-        }
-        // Afterwards: never enqueue, never close (a stalled upload).
-        return new Promise(() => {});
-      },
-    });
-    const req = new Request("http://localhost/x", { method: "POST", body, duplex: "half" } as RequestInit);
-    const started = Date.now();
-    const r = await readJsonBody(req, 4096);
-    expect(r).toMatchObject({ ok: false, status: 413 });
-    expect(Date.now() - started).toBeLessThan(500);
-  });
-
   it("refuses up front when the declared Content-Length is over the cap", async () => {
     const r = await readJsonBody(streamed(["{}"], { "content-length": "999999" }), 1024);
     expect(r).toMatchObject({ ok: false, status: 413 });

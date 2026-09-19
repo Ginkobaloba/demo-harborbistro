@@ -132,6 +132,41 @@ function neverEndingUpload(
   });
 }
 
+/**
+ * Send `bytes` of a chunked body just past the cap, then STOP writing while
+ * keeping the socket open (a stalled sender). Resolves with the first
+ * response, or null status if none arrives within `giveUpMs`.
+ */
+function stalledChunkedUpload(
+  pathname: string,
+  bytes: number,
+  giveUpMs: number,
+): Promise<{ status: number | null; ms: number }> {
+  const started = Date.now();
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: "127.0.0.1",
+      port,
+      path: pathname,
+      method: "POST",
+      headers: { "content-type": "application/json", "transfer-encoding": "chunked" },
+    });
+    const finish = (status: number | null) => {
+      clearTimeout(giveUp);
+      req.destroy();
+      resolve({ status, ms: Date.now() - started });
+    };
+    const giveUp = setTimeout(() => finish(null), giveUpMs);
+    req.on("response", (res) => {
+      res.resume();
+      finish(res.statusCode ?? null);
+    });
+    req.on("error", () => finish(null));
+    req.write('{"name":"' + "x".repeat(bytes - 9));
+    // No further writes and no req.end(): the upload stalls here.
+  });
+}
+
 function reservationRows(): number {
   if (!fs.existsSync(DB)) return 0;
   const db = new Database(DB, { readonly: true, fileMustExist: true });
@@ -205,6 +240,19 @@ describe("byte cap on the real standalone server", () => {
     // The server answered long before anything like the old 10 MB buffer.
     expect(r.bytesSent).toBeLessThan(1024 * 1024);
     expect(reservationRows()).toBe(0);
+  });
+
+  it("answers 413 fast to a sender that crosses the cap slightly and then stalls", async () => {
+    const r = await stalledChunkedUpload("/api/reservations", 9 * 1024, 5_000);
+    expect(r.status).toBe(413);
+    expect(r.ms).toBeLessThan(1_000);
+    expect(reservationRows()).toBe(0);
+  });
+
+  it("answers 413 fast on /api/checkout to a stalled sender just over its cap", async () => {
+    const r = await stalledChunkedUpload("/api/checkout", 33 * 1024, 5_000);
+    expect(r.status).toBe(413);
+    expect(r.ms).toBeLessThan(1_000);
   });
 
   it("does the same on /api/checkout (declared and chunked), with no Stripe call", async () => {

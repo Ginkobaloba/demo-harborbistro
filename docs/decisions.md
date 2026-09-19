@@ -361,11 +361,18 @@ A deep verify of #28 found two pre-existing defects: with Stripe unreachable,
   preset can never produce a tip the server refuses (unit-tested across
   subtotals up to $500,000). Multi-select add-on ids are de-duplicated, so a
   repeated add-on is charged once.
-- **Over-cap uploads end in a readable 413.** After the stream counter
-  trips, `readJsonBody` reads and discards at most 64 KB more for at most
-  50 ms before cancelling the stream, so a client still sending is likelier
-  to see the 413 than a TCP reset. Nothing is retained, and a stalled sender
-  cannot delay the answer past the time bound.
+- **Over-cap uploads: 413, then the stream is closed at once.** When the
+  counter trips, `readJsonBody` cancels the body stream immediately and the
+  route answers 413. A client that is still writing may therefore see a TCP
+  reset instead of reading the 413 (the #31 round-3 re-verify measured
+  about 6% of over-cap uploads). That is accepted. A round-3 attempt to
+  soften it by reading and discarding a bounded amount more (64 KB / 50 ms)
+  was removed: its timed-out pending read made the stream cancel wait for
+  more bytes, so a sender that crossed the cap by less than 64 KB and then
+  stalled got no 413 at all (held 301 s, then 408), endless uploads slowed
+  from about 7 ms to about 510 ms, and resets did not go down. The real-
+  server suite now includes that stalled-sender case (413 in under 1 s on
+  `/api/reservations` and `/api/checkout`).
 - **Every failure before the response is JSON.** Minting the order id
   (`unusedOrderId`) is now wrapped in a try that returns the same JSON 500
   as a failed insert, before Stripe is called.
