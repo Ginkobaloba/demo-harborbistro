@@ -3,8 +3,11 @@ import path from "node:path";
 
 export default defineConfig({
   // tsconfig says jsx: "preserve" (Next.js compiles JSX itself); tests that
-  // render server components need esbuild to emit the automatic runtime.
-  esbuild: { jsx: "automatic" },
+  // render server components need the transformer to emit the automatic
+  // runtime. Vitest 4 transforms with oxc (Vite 8 / rolldown), not esbuild, so
+  // the old `esbuild: { jsx: "automatic" }` is ignored there; this is its
+  // replacement.
+  oxc: { jsx: { runtime: "automatic" } },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
