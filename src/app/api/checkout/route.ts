@@ -43,7 +43,7 @@ const PAYMENT_UNAVAILABLE =
  *   lines: { slug, quantity, selections? }[],
  *   customerName, customerPhone, customerEmail?,
  *   fulfillment: "pickup" | "delivery", deliveryAddress?,
- *   tipCents? (non-negative integer, at most MAX_TIP_CENTS)
+ *   tipCents? (non-negative integer, at most max($1,000, subtotal))
  * }
  *
  * Reprices the cart from the menu database (the client never sets prices),
@@ -91,9 +91,6 @@ export async function POST(req: NextRequest) {
   const customerEmailRaw = value(fields.customerEmail);
   const deliveryAddress = value(fields.deliveryAddress);
   const fulfillment = body.fulfillment as Fulfillment;
-  const tip = parseTipCents(body.tipCents);
-  if (!tip.ok) return NextResponse.json({ error: tip.error }, { status: 400 });
-  const tipCents = tip.value;
 
   if (!customerName || !customerPhone) {
     return NextResponse.json(
@@ -123,6 +120,11 @@ export async function POST(req: NextRequest) {
     }
     throw err;
   }
+
+  // The tip limit scales with the server-priced subtotal (see lib/tip.ts).
+  const tip = parseTipCents(body.tipCents, priced.subtotalCents);
+  if (!tip.ok) return NextResponse.json({ error: tip.error }, { status: 400 });
+  const tipCents = tip.value;
 
   // Tag the order with this browser's visitor id so only this browser (and
   // no other visitor) can see it in the admin views and confirmation (D-016).

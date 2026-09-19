@@ -350,6 +350,49 @@ describe("POST /api/checkout tip validation (W4)", () => {
   });
 });
 
+describe("POST /api/checkout tip limit scales with the subtotal (RB1)", () => {
+  // 50 lines x 12 x $18 = $10,800: well past the old flat $1,000 cap.
+  const bigLines = () => Array.from({ length: 50 }, () => ({ slug: ITEM, quantity: 12 }));
+  const BIG_SUBTOTAL = 50 * 12 * 1800;
+
+  for (const pct of [0.2, 0.18, 0.15]) {
+    it(`checks out a $10,800 cart with the form's ${pct * 100}% preset`, async () => {
+      const { presetTipCents } = await import("@/lib/tip");
+      const tipCents = presetTipCents(BIG_SUBTOTAL, pct);
+      expect(tipCents).toBe(Math.round(BIG_SUBTOTAL * pct));
+      stripeState.create = async () => ({ id: "cs_test_big", url: "https://checkout.stripe.test/c/big" });
+      const res = await route.POST(checkout(validBody({ lines: bigLines(), tipCents })));
+      expect(res.status).toBe(200);
+      const row = db.prepare("SELECT subtotal_cents, tip_cents, total_cents FROM orders").get() as Record<string, number>;
+      expect(row).toEqual({ subtotal_cents: BIG_SUBTOTAL, tip_cents: tipCents, total_cents: BIG_SUBTOTAL + tipCents });
+    });
+  }
+
+  it("accepts a tip of exactly 100% of a large subtotal", async () => {
+    stripeState.create = async () => ({ id: "cs_test_full", url: "https://checkout.stripe.test/c/full" });
+    const res = await route.POST(checkout(validBody({ lines: bigLines(), tipCents: BIG_SUBTOTAL })));
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses a tip one cent over 100% of a large subtotal, before Stripe, storing nothing", async () => {
+    const create = vi.fn();
+    stripeState.create = create;
+    const res = await route.POST(checkout(validBody({ lines: bigLines(), tipCents: BIG_SUBTOTAL + 1 })));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/tip/i);
+    expect(create).not.toHaveBeenCalled();
+    expect(orderCount()).toBe(0);
+  });
+
+  it("keeps the $1,000 floor on a small order", async () => {
+    const create = vi.fn();
+    stripeState.create = create;
+    const res = await route.POST(checkout(validBody({ tipCents: 100_001 })));
+    expect(res.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/checkout add-on de-duplication (W5)", () => {
   it("charges a repeated add-on once", async () => {
     const calls: Array<Record<string, unknown>> = [];

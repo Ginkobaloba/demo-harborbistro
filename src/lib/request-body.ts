@@ -70,7 +70,10 @@ export async function readJsonBody(req: Request, maxBytes: number): Promise<Body
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
-        // Stop pulling the rest of the upload; nothing of it is kept.
+        // Nothing of the upload is kept. Swallow a little more of what is
+        // already in flight so the client is likelier to read the 413 than
+        // a TCP reset, then stop pulling.
+        await drainBriefly(reader);
         await reader.cancel().catch(() => {});
         return { ok: false, status: 413, error: TOO_LARGE };
       }
@@ -91,6 +94,37 @@ export async function readJsonBody(req: Request, maxBytes: number): Promise<Body
     return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) as unknown };
   } catch {
     return { ok: false, status: 400, error: INVALID_JSON };
+  }
+}
+
+/** Upper bounds for the post-cap discard: never more than this, never longer. */
+export const DRAIN_MAX_BYTES = 64 * 1024;
+export const DRAIN_MAX_MS = 50;
+
+/**
+ * Read and DISCARD at most DRAIN_MAX_BYTES more, for at most DRAIN_MAX_MS.
+ * Nothing is retained (no buffering), and a slow or endless sender cannot
+ * hold the 413 back for longer than the time bound.
+ */
+async function drainBriefly(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+  const deadline = Date.now() + DRAIN_MAX_MS;
+  let drained = 0;
+  while (drained < DRAIN_MAX_BYTES) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), remaining);
+    });
+    try {
+      const next = await Promise.race([reader.read(), timeout]);
+      if (next === "timeout" || next.done) return;
+      drained += next.value.byteLength;
+    } catch {
+      return;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

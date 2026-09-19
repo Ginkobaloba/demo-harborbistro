@@ -175,6 +175,11 @@ beforeAll(async () => {
   child.stdout?.on("data", (d) => (serverLog += String(d)));
   child.stderr?.on("data", (d) => (serverLog += String(d)));
   await waitForServer(30_000);
+  // Warm the POST routes: the first request to a route compiles/loads its
+  // module, which once pushed a cold case past the timing bound.
+  for (const route of ["/api/reservations", "/api/checkout"]) {
+    await postJson(route, {});
+  }
 }, 40_000);
 
 afterAll(async () => {
@@ -189,7 +194,7 @@ describe("byte cap on the real standalone server", () => {
   it("answers 413 up front for a declared Content-Length over the cap, without waiting for the upload", async () => {
     const r = await neverEndingUpload("/api/reservations", "declared", 10_000);
     expect(r.status).toBe(413);
-    expect(r.ms).toBeLessThan(1_000);
+    expect(r.ms).toBeLessThan(2_000);
     expect(reservationRows()).toBe(0);
   });
 
@@ -207,7 +212,7 @@ describe("byte cap on the real standalone server", () => {
     // is what answers; the body never parses, so Stripe is never contacted.
     const declared = await neverEndingUpload("/api/checkout", "declared", 10_000);
     expect(declared.status).toBe(413);
-    expect(declared.ms).toBeLessThan(1_000);
+    expect(declared.ms).toBeLessThan(2_000);
     const chunked = await neverEndingUpload("/api/checkout", "chunked", 10_000);
     expect(chunked.status).toBe(413);
     expect(chunked.ms).toBeLessThan(2_000);

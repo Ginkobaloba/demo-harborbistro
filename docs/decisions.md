@@ -348,12 +348,24 @@ A deep verify of #28 found two pre-existing defects: with Stripe unreachable,
   retry (`STRIPE_CLIENT_OPTIONS`), about 21 s worst case, so a hung Stripe
   yields checkout's own 503 inside the proxy's 60 s read timeout instead of
   a 504 after about 241 s.
-- **Tips are validated, not coerced.** `tipCents` must be a JSON number that
-  is a non-negative integer no larger than `MAX_TIP_CENTS` (100000, i.e.
-  $1,000); absent or null means no tip. Booleans, strings, arrays and
-  fractions are 400 (they used to be coerced, and 1e20 was forwarded to
-  Stripe). Multi-select add-on ids are de-duplicated, so a repeated add-on is
-  charged once.
+- **Tips are validated, not coerced, against a limit that scales.** The
+  rules live in `src/lib/tip.ts` (pure, shared by the route and the order
+  form). `tipCents` must be a JSON number that is a non-negative integer no
+  larger than `maxTipCents(subtotal)` = max($1,000, 100% of the
+  server-priced subtotal); absent or null means no tip. Booleans, strings,
+  arrays and fractions are 400 (they used to be coerced, and 1e20 was
+  forwarded to Stripe). A first cut used a flat $1,000 cap, and the #31
+  re-verify showed it broke the form: its default 18% preset 400'd on any
+  subtotal over about $5,556 (reproduced at $6,120). The form now computes
+  presets with `presetTipCents`, which is clamped to the same limit, so a
+  preset can never produce a tip the server refuses (unit-tested across
+  subtotals up to $500,000). Multi-select add-on ids are de-duplicated, so a
+  repeated add-on is charged once.
+- **Over-cap uploads end in a readable 413.** After the stream counter
+  trips, `readJsonBody` reads and discards at most 64 KB more for at most
+  50 ms before cancelling the stream, so a client still sending is likelier
+  to see the 413 than a TCP reset. Nothing is retained, and a stalled sender
+  cannot delay the answer past the time bound.
 - **Every failure before the response is JSON.** Minting the order id
   (`unusedOrderId`) is now wrapped in a try that returns the same JSON 500
   as a failed insert, before Stripe is called.

@@ -6,8 +6,7 @@ import { formatPrice } from "@/lib/menu-format";
 import { useCart } from "@/components/cart/CartProvider";
 import { DemoDataNotice } from "@/components/site/DemoDataNotice";
 import { FIELD_LIMITS } from "@/lib/request-body";
-
-const TIP_PRESETS = [0, 0.15, 0.18, 0.2];
+import { TIP_PRESETS, presetTipCents } from "@/lib/tip";
 
 export default function OrderPage() {
   const { lines, subtotalCents, setQuantity, removeLine } = useCart();
@@ -28,7 +27,8 @@ export default function OrderPage() {
   }, []);
 
   const tipCents = useMemo(
-    () => Math.round(subtotalCents * tipPct),
+    // Clamped to the server's limit (lib/tip.ts), so a preset never 400s.
+    () => presetTipCents(subtotalCents, tipPct),
     [subtotalCents, tipPct],
   );
   const totalCents = subtotalCents + tipCents;
