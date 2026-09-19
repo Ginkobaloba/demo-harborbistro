@@ -57,7 +57,7 @@ PASS (see Warnings). The code under test is still the code on `main`: see
 - **No Stripe API calls, enforced and measured:**
   - Every container ran with `--add-host api.stripe.com:127.0.0.1`. A probe in
     each container resolved `api.stripe.com -> 127.0.0.1`.
-  - Every fake key was 32 characters of random text behind the named prefix.
+  - Every fake key was 24 random characters behind the named prefix (32 total).
     Probes confirmed the overrides by prefix and length only.
   - A small TCP listener on `127.0.0.1:443` inside each container logged every
     connection attempt and closed it (sanity-checked: one probe connection
@@ -435,7 +435,7 @@ permissions (the whole X matrix). slow_network has no surface in this PR.
 | Webhook route unchanged | empty diff on `src/app/api/webhooks` | CONFIRMED |
 | 24h retention: visitor rows older than 24h deleted, seed never, legacy NULL only with `INCLUDE_LEGACY=1`; runs at boot, then at most hourly | backdated rows in Docker: -25h gone in both timestamp formats, -23h kept, seed and NULL at -100h kept, log "deleted 2 orders and 2 reservations" (T1 to T6); 6 requests inside the hour did not purge (T1); host script: dry run, default and `INCLUDE_LEGACY=1` each behave as documented (Layer 1) | CONFIRMED for boot purge, throttle and script; hourly re-fire NOT OBSERVED (would need a 1-hour wait) |
 | 92/92 tests, tsc clean, lint 0 errors / 3 warnings, build clean, seed + verify pass | reproduced exactly (Layer 1) | CONFIRMED |
-| Portal handoff unchanged, no "see everything" path added | `portal-handoff` route not in the diff; no code reads `hb_session` for admin | CONFIRMED (static only) |
+| Portal handoff unchanged, no "see everything" path added | `portal-handoff` route not in the diff; grep of `src/` (tests excluded): `hb_session` appears only in `lib/portal-session.ts` and the handoff handler, and `readHarborSession`/`verifyHarborSession` have no callers outside `portal-session.ts` and the handoff, so no admin page or route reads the session | CONFIRMED (static only) |
 | "I did not apply the `tier-3` label" | the PR does carry `tier-3` now (applied after the PR was written) | STALE, not theater |
 
 ## 4. Blockers
