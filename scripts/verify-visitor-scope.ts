@@ -4,7 +4,7 @@
  * isolation two Playwright browser contexts give.
  *
  *   npm run build
- *   HARBOR_DB_PATH=<copy of a seeded db> npx next start -p 3107
+ *   SESSION_SECRET=<32+ random chars> HARBOR_DB_PATH=<copy of a seeded db> npx next start -p 3107
  *   BASE_URL=http://localhost:3107 HARBOR_DB_PATH=<same path> npm run verify:visitor-scope
  *
  * Local servers only: it books a reservation and (when HARBOR_DB_PATH is set)
@@ -39,8 +39,9 @@ class Browser {
   cookies = new Map<string, string>();
   constructor(readonly name: string) {}
 
+  /** The bare visitor id: the cookie is <id>.<tag> (D-018), the database keeps the id. */
   get visitorId(): string | undefined {
-    return this.cookies.get("hb_visitor");
+    return this.cookies.get("hb_visitor")?.split(".")[0];
   }
 
   async fetch(path: string, init: RequestInit = {}): Promise<{ status: number; body: string }> {

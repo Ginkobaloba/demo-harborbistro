@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { VISITOR_COOKIE, scopeFor, type VisitorScope } from "./visitor";
+import { VISITOR_COOKIE, scopeFromCookieValue, type VisitorScope } from "./visitor";
 
 /**
  * The calling browser's visitor scope, for server components (D-016). Route
@@ -7,11 +7,14 @@ import { VISITOR_COOKIE, scopeFor, type VisitorScope } from "./visitor";
  * directly and so also works when the handler is called outside Next.js
  * (unit tests).
  *
- * On a browser's very first request the middleware mints the id and injects
- * it into the request's Cookie header, so this sees it even before the
- * browser has stored the Set-Cookie.
+ * The cookie's signature is verified (D-018): an unsigned, tampered or
+ * foreign-secret cookie gives seed-only scope, exactly like no cookie.
+ *
+ * On a browser's very first request the middleware mints the signed id and
+ * injects it into the request's Cookie header, so this sees it even before
+ * the browser has stored the Set-Cookie.
  */
 export async function readVisitorScope(): Promise<VisitorScope> {
   const jar = await cookies();
-  return scopeFor(jar.get(VISITOR_COOKIE)?.value);
+  return scopeFromCookieValue(jar.get(VISITOR_COOKIE)?.value);
 }

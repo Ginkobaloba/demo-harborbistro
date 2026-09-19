@@ -34,7 +34,8 @@ Copy `.env.example` for local work. Runtime-only (never needed by `next build`):
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | optional | If set, must be a `pk_test_` key or checkout is refused. |
 | `STRIPE_WEBHOOK_SECRET` | for the webhook | Signing secret (`whsec_...`) for `/api/webhooks/stripe`. Without it the webhook **fails closed** (503, no event is processed). |
 | `PUBLIC_BASE_URL` | optional | Override for the public origin used in Stripe success/cancel URLs. |
-| `SESSION_SECRET`, `PORTAL_*` | for portal sign-in | See `.env.example`. |
+| `SESSION_SECRET` | **yes**, for ordering, reservations and portal sign-in | At least 32 random characters. Signs the `hb_visitor` cookie (D-018) and the portal session. Without it checkout and reservations answer 503 and no visitor cookie is issued. |
+| `PORTAL_*` | for portal sign-in | See `.env.example`. |
 
 ### Stripe webhook
 

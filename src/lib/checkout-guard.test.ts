@@ -42,6 +42,8 @@ describe("POST /api/checkout Stripe guard", () => {
   it("gets past the guard with a test key (fails later on the empty cart)", async () => {
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_abc");
     vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "");
+    // The signed visitor cookie needs a usable secret, or checkout is 503 (D-018).
+    vi.stubEnv("SESSION_SECRET", "g".repeat(48));
     const { POST } = await import("@/app/api/checkout/route");
     const res = await POST(checkoutRequest());
     expect(res.status).toBe(400);

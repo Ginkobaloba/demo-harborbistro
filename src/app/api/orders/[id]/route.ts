@@ -20,7 +20,7 @@ export const runtime = "nodejs";
  */
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const order = getOrder(params.id, scopeFromRequest(req));
+  const order = getOrder(params.id, await scopeFromRequest(req));
   if (!order) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }

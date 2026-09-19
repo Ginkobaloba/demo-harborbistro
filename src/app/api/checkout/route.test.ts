@@ -20,6 +20,8 @@ import { NextRequest } from "next/server";
 const TMP = path.join(os.tmpdir(), `harbor-checkout-${process.pid}.db`);
 process.env.HARBOR_DB_PATH = TMP;
 process.env.HARBOR_RETENTION_DISABLED = "1";
+// The visitor cookie is signed (D-018); without a usable secret every write is 503.
+process.env.SESSION_SECRET = "t".repeat(48);
 
 const stripeState = vi.hoisted(() => ({
   create: null as null | ((params: unknown) => Promise<unknown>),
@@ -49,6 +51,7 @@ type Limits = typeof import("@/lib/request-body");
 let route: RouteModule;
 let limits: Limits;
 let db: Database.Database;
+let signedVisitor: string;
 
 function orderCount(): number {
   return (db.prepare("SELECT COUNT(*) AS c FROM orders").get() as { c: number }).c;
@@ -71,7 +74,7 @@ function checkout(body: unknown, init: { raw?: string; headers?: Record<string, 
     method: "POST",
     headers: {
       "content-type": "application/json",
-      cookie: `hb_visitor=${VISITOR}`,
+      cookie: `hb_visitor=${signedVisitor}`,
       ...(init.headers ?? {}),
     },
     body: init.raw ?? JSON.stringify(body),
@@ -83,6 +86,7 @@ beforeAll(async () => {
     fs.rmSync(`${TMP}${suffix}`, { force: true });
   }
   db = (await import("@/lib/db")).getDb();
+  signedVisitor = (await (await import("@/lib/visitor")).signVisitorId(VISITOR))!;
   db.prepare(
     `INSERT INTO menu_items (slug, name, course, description, price_cents, customization_options)
      VALUES (?, 'Test Chowder', 'entrees', 'A bowl for tests.', 1800, '[]')`,
