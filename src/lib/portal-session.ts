@@ -15,7 +15,7 @@ import { requireSessionSecret } from "./session-secret";
  */
 
 const COOKIE_NAME = "hb_session";
-const SESSION_TTL_SECONDS = 12 * 60 * 60; // 12 hours
+export const SESSION_TTL_SECONDS = 12 * 60 * 60; // 12 hours
 
 export interface HarborSessionPayload extends JWTPayload {
   sub: string;

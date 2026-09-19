@@ -5,10 +5,10 @@ import {
   verifyHarborSession,
   harborSessionCookieName,
   harborSessionCookieAttributes,
+  SESSION_TTL_SECONDS as TTL,
 } from "./portal-session";
 
 const TEST_SECRET = "a".repeat(48);
-const TTL = 12 * 60 * 60; // must track SESSION_TTL_SECONDS in portal-session.ts
 
 /**
  * Hand-sign a token with the repo's own secret, bypassing mintHarborSession
@@ -175,6 +175,26 @@ describe("portal-session", () => {
       const payload = await verifyHarborSession(token);
       expect(payload).not.toBeNull();
       expect(payload?.sub).toBe("a@b.com");
+    });
+
+    it("boundary: exp - iat exactly equal to the TTL is accepted", async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const token = await handSign({
+        sub: "a@b.com",
+        iat: now,
+        exp: now + TTL,
+      });
+      expect(await verifyHarborSession(token)).not.toBeNull();
+    });
+
+    it("boundary: exp - iat one second over the TTL is refused", async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const token = await handSign({
+        sub: "a@b.com",
+        iat: now,
+        exp: now + TTL + 1,
+      });
+      expect(await verifyHarborSession(token)).toBeNull();
     });
   });
 
