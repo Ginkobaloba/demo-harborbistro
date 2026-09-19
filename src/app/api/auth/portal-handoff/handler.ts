@@ -9,6 +9,7 @@ import {
   mintHarborSession,
   harborSessionCookieAttributes,
 } from "@/lib/portal-session";
+import { BODY_LIMITS, readJsonBody } from "@/lib/request-body";
 
 /**
  * Portal handoff logic (chunk 4b), kept out of route.ts so the route file can
@@ -38,15 +39,14 @@ export async function handlePortalHandoff(
   req: Request,
   deps: HandoffDeps = {},
 ): Promise<NextResponse> {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const read = await readJsonBody(req, BODY_LIMITS.portalHandoff);
+  if (!read.ok) {
     return NextResponse.json(
-      { ok: false, error: "bad_request" },
-      { status: 400 },
+      { ok: false, error: read.status === 413 ? "payload_too_large" : "bad_request" },
+      { status: read.status },
     );
   }
+  const body = read.body;
 
   const token =
     typeof body === "object" && body !== null && "token" in body
