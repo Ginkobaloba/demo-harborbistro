@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { StripeModeError, checkStripeTestMode } from "./stripe-mode";
 
 /**
  * Lazily-constructed Stripe client. Construction is deferred so that
@@ -6,26 +7,30 @@ import Stripe from "stripe";
  * not require the secret key to be present. The key is read at request time
  * from STRIPE_SECRET_KEY.
  *
- * Test mode only for this demo: the key must be an sk_test_ key.
+ * Test mode only: every call goes through checkStripeTestMode (stripe-mode.ts)
+ * and throws StripeModeError unless the keys are test-mode keys, so a live key
+ * in the environment can never reach the Stripe API.
  */
-let cached: Stripe | null = null;
+let cached: { key: string; client: Stripe } | null = null;
 
 export function getStripe(): Stripe {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) {
-    throw new Error(
-      "STRIPE_SECRET_KEY is not set. Checkout is unavailable until the demo is run with the Stripe test key in its environment.",
-    );
+  const mode = checkStripeTestMode(process.env);
+  if (!mode.ok) {
+    throw new StripeModeError(mode.message);
   }
-  if (!cached) {
-    cached = new Stripe(key);
+  if (!cached || cached.key !== mode.secretKey) {
+    cached = { key: mode.secretKey, client: new Stripe(mode.secretKey) };
   }
-  return cached;
+  return cached.client;
 }
 
-/** Whether checkout can run in this environment. */
+/**
+ * Whether checkout can run in this environment: a test-mode key is set. A
+ * live key counts as NOT configured, so checkout answers 503 instead of
+ * opening a live session.
+ */
 export function isStripeConfigured(): boolean {
-  return Boolean(process.env.STRIPE_SECRET_KEY);
+  return checkStripeTestMode(process.env).ok;
 }
 
 /** The webhook signing secret, if configured. */

@@ -5,6 +5,8 @@ import {
   getReservationsForDate,
   todayLocalDate,
 } from "@/lib/reservations";
+import { readVisitorScope } from "@/lib/visitor-server";
+import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +14,12 @@ export const metadata: Metadata = {
   title: "Admin",
 };
 
-export default function AdminHomePage() {
-  const counts = getKitchenCounts();
+export default async function AdminHomePage() {
+  // Seed records plus this browser's own orders and bookings only (D-016).
+  const scope = await readVisitorScope();
+  const counts = getKitchenCounts(scope);
   const activeOrders = counts.received + counts.preparing + counts.ready;
-  const todays = getReservationsForDate(todayLocalDate());
+  const todays = getReservationsForDate(todayLocalDate(), scope);
   const upcomingToday = todays.filter(
     (r) => r.status === "confirmed" || r.status === "seated",
   ).length;
@@ -27,6 +31,7 @@ export default function AdminHomePage() {
         Harbor Bistro back-of-house. Orders and reservations are a live source
         of truth, backed by the same database the guest site writes to.
       </p>
+      <DemoScopeNote />
 
       <div className="mt-8 grid gap-5 sm:grid-cols-2">
         <Link

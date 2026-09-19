@@ -19,8 +19,9 @@ function insert(id: string, status: string, ageMinutes = 0): void {
   db.prepare(
     `INSERT INTO orders
        (id, customer_name, customer_phone, fulfillment, items,
-        subtotal_cents, tip_cents, total_cents, status, created_at, updated_at)
-     VALUES (?, 'Test', '555-0100', 'pickup', '[]', 1000, 0, 1000, ?, ?, ?)`,
+        subtotal_cents, tip_cents, total_cents, status, created_at, updated_at,
+        visitor_id)
+     VALUES (?, 'Test', '555-0100', 'pickup', '[]', 1000, 0, 1000, ?, ?, ?, 'seed')`,
   ).run(id, status, created, created);
 }
 

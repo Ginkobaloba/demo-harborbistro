@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import { getItemBySlug } from "./menu";
 import { newOrderId } from "./ids";
+import { SEED_ONLY, scopeSql, type VisitorScope } from "./visitor";
 import type {
   Fulfillment,
   MenuItem,
@@ -208,6 +209,8 @@ export type CreateOrderInput = {
   customerEmail?: string | null;
   fulfillment: Fulfillment;
   deliveryAddress?: string | null;
+  /** The creating browser's visitor id (D-016). Required: no untagged rows. */
+  visitorId: string;
 };
 
 /**
@@ -222,10 +225,12 @@ export function createPendingOrder(input: CreateOrderInput): Order {
     .prepare(
       `INSERT INTO orders (
          id, customer_name, customer_phone, customer_email, fulfillment,
-         delivery_address, items, subtotal_cents, tip_cents, total_cents, status
+         delivery_address, items, subtotal_cents, tip_cents, total_cents, status,
+         visitor_id
        ) VALUES (
          @id, @customerName, @customerPhone, @customerEmail, @fulfillment,
-         @deliveryAddress, @items, @subtotalCents, @tipCents, @totalCents, 'pending'
+         @deliveryAddress, @items, @subtotalCents, @tipCents, @totalCents, 'pending',
+         @visitorId
        )`,
     )
     .run({
@@ -239,14 +244,34 @@ export function createPendingOrder(input: CreateOrderInput): Order {
       subtotalCents: input.subtotalCents,
       tipCents: input.tipCents,
       totalCents,
+      visitorId: input.visitorId,
     });
-  return getOrder(id)!;
+  return getOrderUnscoped(id)!;
 }
 
-export function getOrder(id: string): Order | null {
+/**
+ * Look up an order by id with no visitor scoping. Only for the Stripe
+ * reconciliation paths (webhook, checkout bookkeeping), which are keyed by
+ * ids Stripe hands back and carry no browser cookie. Never feed the result
+ * to a page or API response that a visitor can reach.
+ */
+function getOrderUnscoped(id: string): Order | null {
   const row = getDb()
     .prepare("SELECT * FROM orders WHERE id = ?")
     .get(id) as OrderRow | undefined;
+  return row ? rowToOrder(row) : null;
+}
+
+/**
+ * Look up an order the caller is allowed to see: a seed order or one created
+ * by the caller's own browser (D-016). Returns null for an unknown id and for
+ * another visitor's order alike, so callers cannot tell the two apart.
+ */
+export function getOrder(id: string, scope: VisitorScope = SEED_ONLY): Order | null {
+  const { sql, params } = scopeSql(scope);
+  const row = getDb()
+    .prepare(`SELECT * FROM orders WHERE id = ? AND ${sql}`)
+    .get(id, ...params) as OrderRow | undefined;
   return row ? rowToOrder(row) : null;
 }
 
@@ -275,7 +300,7 @@ export function markOrderPaid(
   orderId: string,
   paymentIntentId: string | null,
 ): Order | null {
-  const order = getOrder(orderId);
+  const order = getOrderUnscoped(orderId);
   if (!order) return null;
   if (order.status === "pending") {
     getDb()
@@ -288,7 +313,7 @@ export function markOrderPaid(
       )
       .run(paymentIntentId, orderId);
   }
-  return getOrder(orderId);
+  return getOrderUnscoped(orderId);
 }
 
 /** Mark a still-pending order cancelled (expired or abandoned checkout). */
@@ -298,7 +323,7 @@ export function markOrderCancelled(orderId: string): Order | null {
       "UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
     )
     .run(orderId);
-  return getOrder(orderId);
+  return getOrderUnscoped(orderId);
 }
 
 // ----------------------------------------------------------- kitchen / operator
@@ -344,14 +369,29 @@ export class OrderTransitionError extends Error {
 }
 
 /**
+ * Raised when the order is unknown or belongs to another visitor. Routes map
+ * it to 404 (never 409), so an out-of-scope id is indistinguishable from a
+ * missing one.
+ */
+export class OrderNotFoundError extends OrderTransitionError {
+  constructor(orderId: string) {
+    super(`Unknown order ${orderId}`);
+    this.name = "OrderNotFoundError";
+  }
+}
+
+/**
  * Advance a paid order to the next kitchen status (received -> preparing ->
  * ready -> completed). Throws OrderTransitionError if the order is unknown,
  * unpaid, or already terminal. The status guard in the WHERE clause makes the
  * write idempotent under concurrent operator clicks.
  */
-export function advanceOrder(orderId: string): Order {
-  const order = getOrder(orderId);
-  if (!order) throw new OrderTransitionError(`Unknown order ${orderId}`);
+export function advanceOrder(
+  orderId: string,
+  scope: VisitorScope = SEED_ONLY,
+): Order {
+  const order = getOrder(orderId, scope);
+  if (!order) throw new OrderNotFoundError(orderId);
   const next = nextOrderStatus(order.status);
   if (!next) {
     throw new OrderTransitionError(
@@ -364,7 +404,7 @@ export function advanceOrder(orderId: string): Order {
        WHERE id = ? AND status = ?`,
     )
     .run(next, orderId, order.status);
-  return getOrder(orderId)!;
+  return getOrderUnscoped(orderId)!;
 }
 
 /**
@@ -372,9 +412,12 @@ export function advanceOrder(orderId: string): Order {
  * markOrderCancelled (which only touches still-`pending` checkouts): this is
  * the operator cancelling an in-progress kitchen order.
  */
-export function cancelActiveOrder(orderId: string): Order {
-  const order = getOrder(orderId);
-  if (!order) throw new OrderTransitionError(`Unknown order ${orderId}`);
+export function cancelActiveOrder(
+  orderId: string,
+  scope: VisitorScope = SEED_ONLY,
+): Order {
+  const order = getOrder(orderId, scope);
+  if (!order) throw new OrderNotFoundError(orderId);
   if (!ACTIVE_ORDER_STATUSES.includes(order.status as ActiveOrderStatus)) {
     throw new OrderTransitionError(
       `Order ${orderId} cannot be cancelled from "${order.status}"`,
@@ -385,43 +428,54 @@ export function cancelActiveOrder(orderId: string): Order {
       "UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?",
     )
     .run(orderId);
-  return getOrder(orderId)!;
+  return getOrderUnscoped(orderId)!;
 }
 
-/** Live kitchen queue, oldest first (the order a cook should start next). */
-export function getActiveOrders(): Order[] {
+/**
+ * Live kitchen queue, oldest first (the order a cook should start next).
+ * Scoped to seed orders plus the caller's own (D-016).
+ */
+export function getActiveOrders(scope: VisitorScope = SEED_ONLY): Order[] {
+  const { sql, params } = scopeSql(scope);
   const rows = getDb()
     .prepare(
       `SELECT * FROM orders
-       WHERE status IN ('received','preparing','ready')
+       WHERE status IN ('received','preparing','ready') AND ${sql}
        ORDER BY created_at ASC`,
     )
-    .all() as OrderRow[];
+    .all(...params) as OrderRow[];
   return rows.map(rowToOrder);
 }
 
-/** Recently finished orders (completed or cancelled), newest first. */
-export function getRecentOrders(limit = 25): Order[] {
+/** Recently finished orders (completed or cancelled), newest first. Scoped. */
+export function getRecentOrders(
+  scope: VisitorScope = SEED_ONLY,
+  limit = 25,
+): Order[] {
+  const { sql, params } = scopeSql(scope);
   const rows = getDb()
     .prepare(
       `SELECT * FROM orders
-       WHERE status IN ('completed','cancelled')
+       WHERE status IN ('completed','cancelled') AND ${sql}
        ORDER BY updated_at DESC
        LIMIT ?`,
     )
-    .all(limit) as OrderRow[];
+    .all(...params, limit) as OrderRow[];
   return rows.map(rowToOrder);
 }
 
-/** Counts per active status for the operator header, e.g. {received: 3, ...}. */
-export function getKitchenCounts(): Record<ActiveOrderStatus, number> {
+/** Counts per active status for the operator header, e.g. {received: 3, ...}. Scoped. */
+export function getKitchenCounts(
+  scope: VisitorScope = SEED_ONLY,
+): Record<ActiveOrderStatus, number> {
+  const { sql, params } = scopeSql(scope);
   const rows = getDb()
     .prepare(
       `SELECT status, COUNT(*) c FROM orders
-       WHERE status IN ('received','preparing','ready')
+       WHERE status IN ('received','preparing','ready') AND ${sql}
        GROUP BY status`,
     )
-    .all() as { status: ActiveOrderStatus; c: number }[];
+    .all(...params) as { status: ActiveOrderStatus; c: number }[];
   const counts: Record<ActiveOrderStatus, number> = {
     received: 0,
     preparing: 0,

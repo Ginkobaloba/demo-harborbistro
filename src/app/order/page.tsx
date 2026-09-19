@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatPrice } from "@/lib/menu-format";
 import { useCart } from "@/components/cart/CartProvider";
+import { DemoDataNotice } from "@/components/site/DemoDataNotice";
 
 const TIP_PRESETS = [0, 0.15, 0.18, 0.2];
 
@@ -166,6 +167,7 @@ export default function OrderPage() {
           className="h-fit rounded-2xl bg-harbor-cream-deep p-6 shadow-warm"
         >
           <h2 className="font-serif text-xl">Your details</h2>
+          <DemoDataNotice className="mt-3" />
 
           <div className="mt-4 space-y-3">
             <Field label="Name" required>

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { RESTAURANT } from "@/lib/restaurant";
+import { DemoDataNotice } from "@/components/site/DemoDataNotice";
 
 const PARTY_SIZES = Array.from({ length: 12 }, (_, i) => i + 1);
 
@@ -102,6 +103,7 @@ export default function ReservationsPage() {
         </p>
 
         <form onSubmit={handleSubmit} className="mt-10 space-y-7">
+          <DemoDataNotice />
           {/* Date */}
           <div>
             <label htmlFor="date" className={labelClass}>

@@ -6,7 +6,7 @@
  *
  * Run: npm run db:verify
  */
-import { getDb } from "../src/lib/db";
+import { getDb, SEED_VISITOR_ID } from "../src/lib/db";
 import { COURSES } from "../src/lib/types";
 
 const db = getDb();
@@ -118,6 +118,15 @@ check(
   resWindow.lo >= localToday && resWindow.hi <= twoWeeks,
   `${resWindow.lo}..${resWindow.hi}`,
 );
+
+// Visitor scoping (D-016): every seeded record carries the seed marker, so it
+// stays visible to every visitor and is never touched by the retention purge.
+for (const table of ["orders", "reservations"]) {
+  const unmarked = (db
+    .prepare(`SELECT COUNT(*) c FROM ${table} WHERE visitor_id IS NOT ?`)
+    .get(SEED_VISITOR_ID) as { c: number }).c;
+  check(`every seeded ${table} row carries the seed marker`, unmarked === 0, `${unmarked} unmarked`);
+}
 
 if (failures.length > 0) {
   console.error("Seed verification FAILED:");

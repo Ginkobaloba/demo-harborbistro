@@ -6,6 +6,7 @@ import { ORDER_STATUS_LABELS } from "@/lib/types";
 import { getOrder, lineDescription, markOrderPaid } from "@/lib/orders";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { OrderTracker } from "@/components/order/OrderTracker";
+import { readVisitorScope } from "@/lib/visitor-server";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,10 @@ type Props = {
 export default async function OrderConfirmationPage(props: Props) {
   const searchParams = await props.searchParams;
   const params = await props.params;
-  let order = getOrder(params.id);
+  // Only a seed order or one this browser placed resolves (D-016). The check
+  // runs before the Stripe reconcile below, so another visitor's order code
+  // can neither be viewed nor nudged from here.
+  let order = getOrder(params.id, await readVisitorScope());
   if (!order) notFound();
 
   // Safety net: reconcile against Stripe in case the webhook is delayed or not

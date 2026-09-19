@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getReservation, formatTime, formatDate } from "@/lib/reservations";
 import { RESTAURANT } from "@/lib/restaurant";
+import { readVisitorScope } from "@/lib/visitor-server";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,8 @@ type Props = { params: Promise<{ id: string }> };
 
 export default async function ConfirmationPage(props: Props) {
   const params = await props.params;
-  const reservation = getReservation(params.id);
+  // Only a seed booking or one this browser made resolves (D-016).
+  const reservation = getReservation(params.id, await readVisitorScope());
   if (!reservation) notFound();
 
   return (

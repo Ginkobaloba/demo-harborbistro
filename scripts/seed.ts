@@ -7,7 +7,7 @@
  * Run: npm run db:seed
  */
 import fs from "node:fs";
-import { getDb, DB_PATH } from "../src/lib/db";
+import { getDb, DB_PATH, SEED_VISITOR_ID } from "../src/lib/db";
 import { newOrderId, newReservationId } from "../src/lib/ids";
 import { SEED_MENU } from "../src/data/menu-items";
 import type { OrderLineItem, OrderStatus } from "../src/lib/types";
@@ -105,11 +105,11 @@ const insertOrder = db.prepare(`
   INSERT INTO orders (
     id, customer_name, customer_phone, customer_email, fulfillment,
     delivery_address, items, subtotal_cents, tip_cents, total_cents,
-    status, stripe_payment_intent_id, created_at, updated_at
+    status, stripe_payment_intent_id, visitor_id, created_at, updated_at
   ) VALUES (
     @id, @customerName, @customerPhone, @customerEmail, @fulfillment,
     @deliveryAddress, @items, @subtotalCents, @tipCents, @totalCents,
-    @status, @stripePaymentIntentId, @createdAt, @updatedAt
+    @status, @stripePaymentIntentId, @visitorId, @createdAt, @updatedAt
   )
 `);
 
@@ -157,6 +157,7 @@ db.transaction(() => {
       totalCents: subtotal + tip,
       status,
       stripePaymentIntentId: `pi_demo_${String(i).padStart(3, "0")}`,
+      visitorId: SEED_VISITOR_ID,
       createdAt: created.toISOString(),
       updatedAt: created.toISOString(),
     });
@@ -168,10 +169,10 @@ db.transaction(() => {
 const insertReservation = db.prepare(`
   INSERT INTO reservations (
     id, name, phone, email, party_size, reserved_date, reserved_time,
-    notes, status, created_at
+    notes, status, visitor_id, created_at
   ) VALUES (
     @id, @name, @phone, @email, @partySize, @reservedDate, @reservedTime,
-    @notes, @status, @createdAt
+    @notes, @status, @visitorId, @createdAt
   )
 `);
 
@@ -220,6 +221,7 @@ db.transaction(() => {
       reservedTime: pick(TIMES, i * 3),
       notes: pick(NOTES, i),
       status: onToday ? TODAY_STATUSES[i] : "confirmed",
+      visitorId: SEED_VISITOR_ID,
       createdAt: new Date(Date.now() - i * 5 * 60 * 60_000).toISOString(),
     });
   }

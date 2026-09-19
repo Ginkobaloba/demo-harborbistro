@@ -27,9 +27,14 @@ import {
 import { getStripe, isStripeConfigured } from "../src/lib/stripe";
 import { handleStripeEvent } from "../src/lib/stripe-webhook";
 import { getItemBySlug } from "../src/lib/menu";
+import { newVisitorId, scopeFor } from "../src/lib/visitor";
 import type { MenuItem } from "../src/lib/types";
 
 const failures: string[] = [];
+
+// Every order this script writes belongs to one throwaway visitor (D-016).
+const VISITOR_ID = newVisitorId();
+const SCOPE = scopeFor(VISITOR_ID);
 let passed = 0;
 
 function check(label: string, ok: boolean, detail?: string) {
@@ -151,6 +156,7 @@ async function main() {
     customerPhone: "555-0100",
     customerEmail: "diner@example.com",
     fulfillment: "pickup",
+    visitorId: VISITOR_ID,
   });
   check("new order is pending", order.status === "pending");
   check(
@@ -181,16 +187,17 @@ async function main() {
     customerName: "Cancel Me",
     customerPhone: "555-0101",
     fulfillment: "pickup",
+    visitorId: VISITOR_ID,
   });
   markOrderCancelled(cancelTarget.id);
   check(
     "pending order can be cancelled",
-    getOrder(cancelTarget.id)?.status === "cancelled",
+    getOrder(cancelTarget.id, SCOPE)?.status === "cancelled",
   );
   markOrderCancelled(order.id); // already received
   check(
     "received order is not cancelled",
-    getOrder(order.id)?.status === "received",
+    getOrder(order.id, SCOPE)?.status === "received",
   );
 
   // --- webhook handler ---------------------------------------------------
@@ -201,6 +208,7 @@ async function main() {
     customerName: "Webhook Diner",
     customerPhone: "555-0102",
     fulfillment: "pickup",
+    visitorId: VISITOR_ID,
   });
   const completedEvent = {
     type: "checkout.session.completed",
@@ -217,7 +225,7 @@ async function main() {
   check("webhook completed event handled", r1.handled === true);
   check(
     "webhook marks order received",
-    getOrder(webhookOrder.id)?.status === "received",
+    getOrder(webhookOrder.id, SCOPE)?.status === "received",
   );
 
   const expireOrder = createPendingOrder({
@@ -227,6 +235,7 @@ async function main() {
     customerName: "Expire Diner",
     customerPhone: "555-0103",
     fulfillment: "pickup",
+    visitorId: VISITOR_ID,
   });
   const expiredEvent = {
     type: "checkout.session.expired",
@@ -237,7 +246,7 @@ async function main() {
   handleStripeEvent(expiredEvent);
   check(
     "webhook expired event cancels order",
-    getOrder(expireOrder.id)?.status === "cancelled",
+    getOrder(expireOrder.id, SCOPE)?.status === "cancelled",
   );
 
   const unpaidEvent = {
