@@ -1,7 +1,714 @@
 # Deep Verify: PR #31 checkout 503 with no order row, public request body caps (2026-09-19)
 
 Overall: FAIL
-Tested-SHA: 0a837249dd04a476928880164f831044b6a5e2cb
+Tested-SHA: ad5713eb5f15f74de827e7919841d002f6fea969
+
+**Re-verify at `ad5713e` (current verdict).** The first run's blocker is
+fixed. With the middleware off `/api/`, the byte cap now acts while reading
+on a freshly built production image:
+- a declared 1 MB body gets 413 in 6 ms, before any body byte is sent;
+- an endless chunked upload gets 413 in 7 ms, after 64 KB;
+- a trickled one gets 413 right after 8 KB;
+- memory under sustained 9 MB upload waves stayed flat (70 to 84 MiB, where
+  it was 105 to 389 MiB before).
+
+W2, W3 and W5 behave exactly as claimed. The PR #28 regression harness passed
+221 of 221. The builder's real-server suite is a meaningful gate: it fails 4
+of 6 against the old middleware.
+
+**It is still FAIL, because the W4 tip cap introduced a new checkout
+regression.** The order form sends a default 18% tip, computed as
+`Math.round(subtotal * 0.18)`. Once the subtotal passes $5,555.56 (or $5,000
+at the 20% preset), that tip is over the new 100000-cent cap. The server then
+refuses the whole checkout with "Tip must be a whole number of cents from 0
+to 100000". This was reproduced through the real UI in headless Chromium: 27
+dishes x 12 added through the item pages, subtotal $6,120.00, default tip
+$1,101.60, `/api/checkout` 400, and the message was shown on the page (U7).
+It is a small fix; see Re-verify Blockers.
+
+Re-verify totals:
+- attack harness: 116 of 119;
+- PR #28 regression: 221 of 221, plus 7 N/A and 2 SKIP;
+- unit tests: 136 of 136;
+- in-process collision probe: 4 of 4;
+- builder's server suite: 6 of 6 warm (it failed its first cold run by
+  401 ms);
+- gate check: the same suite against the old middleware failed 4 of 6, as it
+  should.
+
+The 3 attack FAILs are D10 and U7 (the tip regression, at the API and in the
+UI) and B-R7 (a TCP-reset rate under load, which is a warning, not a cap
+failure). The first run (FAIL at `0a83724`) is kept below as history.
+
+## 0. Re-verify at ad5713e (2026-09-19)
+
+### 0.1 Scope
+
+- **Target:** PR #31 head `ad5713eb5f15f74de827e7919841d002f6fea969`, pulled
+  with `git pull --ff-only`. It is the builder's commit on top of the first
+  report (`90cc60c`).
+- **Mode:** deep, layers 1, 2, 3, 4 and 6. Layer 5 (headed Chrome) was not
+  run, same reason as before.
+- **Environment:** the same rules as the first run.
+  - One image, `demo-harborbistro:dv31`, was rebuilt from `ad5713e` with the
+    npm secret pattern. The temporary npmrc was deleted right after the
+    build, and the token was never printed.
+  - The build ran seed ("60 menu items, 20 orders, 15 reservations"),
+    seed verification ("passed") and `next build` ("Compiled successfully").
+  - The built `server.js` carries `middlewareClientMaxBodySize: 65536`.
+  - The compiled middleware matcher starts `(?!api\/|_next\/static|...`.
+  - The same nine `dv31-*` containers ran on `127.0.0.1:18411-18419`, all
+    with `--add-host api.stripe.com:127.0.0.1`: fake keys, the counting
+    listener, and the fake Stripe in `dv31-fake`.
+  - The final regression run and the final attack run each started on freshly
+    created containers.
+- The builder's server suite runs the built `.next/standalone/server.js` as
+  a local process on a random loopback port, with its own temp database and a
+  placeholder `sk_test_` key. It has no network egress to Stripe.
+- The live container, the public URL, demo-proxy and cloudflare-config were
+  not touched.
+- Evidence: the same scratch dir as the first run.
+  - Harness logs: `attack-r2final.log`, `regress-r2.log`, `b7probe.mjs` output
+    (quoted below).
+  - Layer 1 logs: `vitest-r2.log`, `unitprobe-r2.log`.
+  - Server suite logs: `serversuite-head*.log`, `serversuite-oldmw.log`,
+    `serversuite-oldboth.log`.
+  - Build log: `build2.log`.
+
+### 0.2 Diff review, `0a83724` to `ad5713e`
+
+`git diff 0a83724 ad5713e --stat` lists 11 files. One is this report,
+committed as `90cc60c`. The builder's commit itself (`90cc60c..ad5713e`)
+touches 10 files, and every change matches what the builder listed:
+
+- **`src/middleware.ts`:** the matcher adds `api/` to the negative lookahead.
+  The comment explains the reason (D-017).
+- **`next.config.mjs`:** `experimental.middlewareClientMaxBodySize: "64kb"`.
+- **`src/lib/stripe.ts`:** `STRIPE_CLIENT_OPTIONS = { timeout: 10_000,
+  maxNetworkRetries: 1 }`, passed to `new Stripe(...)`.
+- **`src/lib/orders.ts`:**
+  - `MAX_TIP_CENTS = 100_000`;
+  - `parseTipCents` accepts absent or null as 0, and otherwise only a JSON
+    number that is a non-negative integer no larger than the cap (it folds
+    -0 to 0);
+  - multi-select ids are de-duplicated with a `Set`.
+- **`src/app/api/checkout/route.ts`:**
+  - uses `parseTipCents`, and 400s before Stripe on a bad tip;
+  - wraps `unusedOrderId()` in a try that returns the same JSON 500 as a
+    failed insert;
+  - adds `logSaveFailure` (order id and error class only).
+- **Tests:** `route.test.ts` (+122), `stripe-mode.test.ts` (+12), the new
+  `test/server/body-caps.server.test.ts` (246) and `vitest.server.config.ts`.
+- **`docs/decisions.md`:** D-017 is extended and accurate to what was
+  measured, including that an understated Content-Length ends in a 400 by
+  HTTP framing.
+- No dependency, lockfile, webhook or page changes. Nothing unexpected.
+
+### 0.3 Results by category
+
+| Category | Result | Evidence |
+|---|---|---|
+| read-time byte cap (first-run B1) | PASS | B-R1, B-R2, B-R4, B-R6, B-R8, B-R9 (all under 2.5 s, most under 10 ms); memory flat in B-R7 |
+| byte cap outcome and boundaries | PASS | B-*-1/2/3, B-mb, B-1mb, B-under, B-over, B-gzip, B-R5 |
+| /api with the middleware skipped | PASS | A1 to A10 (route-minted cookie, forged cookies, GET and admin scoping, webhook) plus regression 221/221 |
+| payment path (claim 1) | PASS | C1 to C11 unchanged; C12 now 503 in 20.5 s |
+| W2 Stripe timeout | PASS | C12: 503 after 20.5 s, exactly 2 attempts, no row |
+| W3 unusedOrderId wrapped | PASS | probe V4: `returned 500 {"error":"Your order could not be saved. Please try again."}`, 0 Stripe calls, 0 rows |
+| W4 tip validation, as specified | PASS | D1 to D8b: 13 bad shapes are 400 before Stripe, 100000 accepted, 0 / -0 / null / absent are 0 |
+| W4 effect on a legal checkout | **FAIL** | D10 (API, largest legal cart) and U7 (real UI, $6,120 cart): the form's default tip is refused |
+| W5 add-on de-duplication | PASS | D9: bacon x200 priced and stored as one bacon |
+| field limits, types, multibyte | PASS | F-* unchanged |
+| builder's real-server suite as a gate | PASS (warning) | 6/6 warm at head; 4/6 fail with the old middleware; cold first run flaked |
+| Layer 1 | PASS | vitest 136/136, tsc exit 0, lint 0 errors / 3 pre-existing warnings |
+| smoke, navigation, headless | PASS | regression Q, H sections; U1 to U6 |
+| accessibility / visual / cross-browser | SKIP | as in the first run |
+
+### 0.4 Builder's real-server suite
+
+At `ad5713e`, after `npm run build`:
+
+- **First run** (cold, right after the build): 5 of 6. Case 1 failed with
+  `expected 1401 to be less than 1000`. The first POST after server start
+  paid module-load time.
+- **Three further runs:** 6 of 6 each (`Tests 6 passed (6)`, about 1.4 s).
+
+Is it a gate? Two builds, with `src/middleware.ts` (and in the second build
+also `next.config.mjs`) swapped to the `0a83724` versions, then restored with
+`git checkout --`:
+
+| Build | Result | Failing cases |
+|---|---|---|
+| old middleware + new 64kb config | 4 failed, 2 passed | declared, chunked, checkout (each a 10 s timeout), middleware-on-pages-not-api |
+| old middleware + old config | 4 failed, 2 passed | the same 4 |
+
+So the suite catches the regression it exists for, which confirms the
+builder's "4 of 6". It also shows that **`middlewareClientMaxBodySize` alone
+does not fix the hang.** It only caps memory. The matcher is the actual fix,
+and the suite's last case guards it. The `.next` build was rebuilt at head
+afterwards, and the worktree was clean.
+
+**No CI workflow runs vitest at all.** `.github/workflows/verify.yml` only
+runs the smoke and deep-gate scripts. So both the unit tests and this suite
+are manual gates today (Warnings).
+
+### 0.5 Verbatim logs
+
+Attack harness at `ad5713e` (`attack-r2final.log`, fresh containers). New
+or changed sections compared with the first run:
+- D is rewritten for W4 and W5;
+- B-R1 to B-R9 are rewritten, with time limits;
+- A is new (/api without middleware);
+- U7 is new;
+- C12 is now bounded at 25 s.
+
+```
+
+== C: checkout payment path, Stripe failure modes (fake Stripe in dv31-fake, reset listener in dv31-test) ==
+PASS  C1a  Stripe unreachable, connection refused: 503 JSON with exactly the fixed message  [503 592 ms {"error":"The payment service is temporarily unavailable, so your order was not ]
+PASS  C1b  connection refused: NO order row written  [orders 20->20]
+PASS  C1c  connection refused: response leaks no internals  [none]
+PASS  C2a  Stripe connection reset mid-handshake (dv31-test listener): 503, JSON content-type, body is exactly the fixed message  [503 application/json {"error":"The payment service is temporarily unavailable, so your order was not placed. Pl]
+PASS  C2b  Stripe connection reset mid-handshake (dv31-test listener): Stripe was actually attempted, and NO order row was written  [stripe calls 0->2, orders 20->20]
+PASS  C2c  Stripe connection reset mid-handshake (dv31-test listener): response leaks no internals (sentinel, host, errno, key, stack)  [none]
+PASS  C3a  Stripe 400 invalid_request_error carrying a sentinel message: 503, JSON content-type, body is exactly the fixed message  [503 application/json {"error":"The payment service is temporarily unavailable, so your order was not placed. Pl]
+PASS  C3b  Stripe 400 invalid_request_error carrying a sentinel message: Stripe was actually attempted, and NO order row was written  [stripe calls 0->1, orders 20->20]
+PASS  C3c  Stripe 400 invalid_request_error carrying a sentinel message: response leaks no internals (sentinel, host, errno, key, stack)  [none]
+PASS  C4a  Stripe 500 api_error: 503, JSON content-type, body is exactly the fixed message  [503 application/json {"error":"The payment service is temporarily unavailable, so your order was not placed. Pl]
+PASS  C4b  Stripe 500 api_error: Stripe was actually attempted, and NO order row was written  [stripe calls 1->3, orders 20->20]
+PASS  C4c  Stripe 500 api_error: response leaks no internals (sentinel, host, errno, key, stack)  [none]
+PASS  C5a  Stripe 200 with a non-JSON body: 503, JSON content-type, body is exactly the fixed message  [503 application/json {"error":"The payment service is temporarily unavailable, so your order was not placed. Pl]
+PASS  C5b  Stripe 200 with a non-JSON body: Stripe was actually attempted, and NO order row was written  [stripe calls 3->4, orders 20->20]
+PASS  C5c  Stripe 200 with a non-JSON body: response leaks no internals (sentinel, host, errno, key, stack)  [none]
+PASS  C6a  Stripe session with url null: 503, JSON content-type, body is exactly the fixed message  [503 application/json {"error":"The payment service is temporarily unavailable, so your order was not placed. Pl]
+PASS  C6b  Stripe session with url null: Stripe was actually attempted, and NO order row was written  [stripe calls 4->5, orders 20->20]
+PASS  C6c  Stripe session with url null: response leaks no internals (sentinel, host, errno, key, stack)  [none]
+INFO  checkout log lines: [checkout] Stripe session create failed: StripeConnectionError | [checkout] Stripe session create failed: StripeInvalidRequestError (amount_too_large) | [checkout] Stripe session create failed: StripeAPIError | [checkout] Stripe session create failed: Error
+PASS  C7  server log lines for Stripe failures carry only the error type/code: no sentinel message, no key, no host  [6 lines]
+PASS  C7b  the 400 case is logged with its Stripe code (StripeInvalidRequestError / invalid_request_error (amount_too_large))  []
+PASS  C8a  ok session: 200 with { url, orderId }, url is the session URL  [200 HB-M588S]
+PASS  C8b  ok session: the order row did NOT exist while Stripe was being called (checked by the fake from the DB)  [rowDuringCall=false]
+PASS  C8c  ok session: exactly one new row, pending, tagged with the caller visitor id, session id stored in the same insert  [pending sess=true]
+PASS  C8d  ok session: client_reference_id, metadata[order_id], payment_intent_data[metadata][order_id] all equal the returned orderId  [HB-M588S]
+PASS  C8e  ok session: success_url and cancel_url carry the same orderId  [/order/confirmation/HB-M588S?session_id={CHECKOUT_SESSION_ID}]
+PASS  C8f  ok session: totals agree (row subtotal + tip = row total = sum of Stripe line items); tip sent as its own line  [1400+250=1650, stripe 1650]
+PASS  C9a  insert fails after Stripe succeeded: JSON 500 with the fixed "could not be saved" message (not an empty 500)  [500 application/json {"error":"Your order could not be saved. Please try again."}]
+PASS  C9b  insert fails: the squatting row is untouched (not overwritten by the visitor), and no second row appears  [{"n":"Squatter Row dv31","v":"dv31-squatter","s":"received","sid":null}]
+PASS  C9c  insert fails: the response carries no session URL, so the orphan test session cannot be paid by this visitor  [{"error":"Your order could not be saved. Please try again."}]
+PASS  C9d  insert fails: log names the order id and error class only (no customer name or phone)  [[checkout] could not save order HB-4DJWD: SqliteError]
+PASS  C10  slow Stripe (3 s): 200 and a row, nothing written before the session came back  [200 3021 ms]
+PASS  C11  20 concurrent checkouts: 20 x 200, 20 distinct order ids, 20 rows each tagged with its own visitor, no row existed during any Stripe call  [20 ok, 20 ids, 20 rows]
+
+== D: tipCents (W4) and duplicate add-ons (W5), fake Stripe in ok mode ==
+PASS  D1  tip -500: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D2  tip -0.4: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D3  tip 1e400 (JSON Infinity): 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D4  tip 1e20: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D5  tip 100001 (cap + 1): 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D6  tip 2^53+1: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D7a  tip "abc": 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D7b  tip true: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D7c  tip [5]: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D7d  tip " 7 ": 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D7e  tip 0.5: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D7f  tip "100": 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D7g  tip {}: 400 "Tip must be a whole number of cents from 0 to 100000", no Stripe call, no row  [400 Tip must be a whole number of cents from 0 to 100000]
+PASS  D8  tip 100000 accepted (row tip 100000, Stripe Tip line 100000); 0, -0, null and absent give tip 0 with no Tip line  [200/100000 200/0 200/0 200/0 200/0]
+PASS  D8b  across every tip tried, no stored order has a tip outside 0..100000, a non-integer tip, or a total below its subtotal  [0 bad rows]
+INFO  D10 largest legal cart (50 lines x 12): subtotal 840000 cents; the form's default 18% tip is 151200 cents -> 400 {"error":"Tip must be a whole number of cents from 0 to 100000"}
+INFO  D10b the default 18% tip exceeds the cap once the subtotal passes 555556 cents ($5555.56); 20% passes it above $5000.00
+FAIL  D10  legal UI-shaped order: the form default 18% tip on the largest legal cart is accepted  [400 subtotal 840000 tip 151200]
+INFO  D9 harbor-smash-burger: plain 1700, bacon x1 2000, bacon x200 2000; stored extras for x200 = ["bacon"]; [bacon,egg,bacon,egg,egg] 2200 vs [bacon,egg] 2200
+PASS  D9  W5: "bacon" x200 is priced and stored exactly like "bacon" x1 (one bacon), and mixed duplicates equal the de-duplicated set  [2000=2000=1700+300, 2200=2200]
+
+== E: malformed carts and bodies (looking for any bare or non-JSON 500) ==
+INFO  E statuses: lines [null]:400, lines [1]:400, lines ["x"]:400, lines [[]]:400, slug object:400, quantity "1":200, quantity 1.5:400, quantity -1:400, quantity 13:400, selections "abc":400, selections 5:200, selections []:200, selections null:200, selections __proto__:400, selections constructor:400, burger bun array:400, burger bun null:400, burger extras object:400, burger extras [null]:400, burger extras "bacon":200, lines array-like object:400, 51 lines:400, 50 lines:200, fulfillment object:400, customerName object:400, customerName array:400, customerPhone number:400, body null:400, body []:400, body "str":400, body 123:400, body true:400, empty body:400, huge slug 30 KB:400, unicode slug:400
+PASS  E1  35 malformed carts/bodies against a working Stripe: no 5xx, every response is JSON  [none]
+PASS  E2  51 lines -> 400 and 50 lines accepted  [51 lines:400,50 lines:200]
+
+== F: field limits after trim, UTF-16 units vs UTF-8 bytes, non-string values (reservations on dv31-none, checkout on dv31-fake) ==
+PASS  F-name  reservation name: 100 ASCII accepted and stored whole; 101 -> 400 "Name must be at most 100 characters", nothing stored  [201/400]
+PASS  F-phone  reservation phone: 32 ASCII accepted and stored whole; 33 -> 400 "Phone must be at most 32 characters", nothing stored  [201/400]
+PASS  F-email  reservation email: 254 ASCII accepted and stored whole; 255 -> 400 "Email must be at most 254 characters", nothing stored  [201/400]
+PASS  F-notes  reservation notes: 500 ASCII accepted and stored whole; 501 -> 400 "Notes must be at most 500 characters", nothing stored  [201/400]
+PASS  F-mb1  reservation name: 100 x e-acute (2 bytes each) accepted, stored intact  [201 units=100 bytes=200]
+PASS  F-mb2  reservation name: 50 emoji (100 UTF-16 units, 200 bytes) accepted, stored intact  [201 units=100 bytes=200]
+PASS  F-mb3  reservation name: 51 emoji (102 units) -> 400  [400 units=102 bytes=204]
+PASS  F-mb4  reservation name: 100 CJK (300 bytes) accepted  [201 units=100 bytes=300]
+PASS  F-mb5  reservation name: 101 CJK -> 400  [400 units=101 bytes=303]
+PASS  F-mb6  reservation name: 99 ASCII + 1 emoji (101 units, what maxLength also blocks) -> 400  [400 units=101 bytes=103]
+PASS  F-mb7  reservation name: 50 decomposed e + combining accent (100 units) accepted  [201 units=100 bytes=150]
+PASS  F-worst  reservation: every field at its limit with the worst-case JSON encoding (\u escapes) is 5409 bytes, under 8192, and is accepted and stored intact  [201 5409 bytes]
+PASS  F-trim  reservation name: 100 chars wrapped in ASCII and ideographic whitespace accepted, stored trimmed at 100  [201]
+PASS  F-trim2  reservation name of only whitespace -> 400 (required), nothing stored  [400 {"error":"name, phone, partySize, date, and time are require]
+PASS  F-types  reservation: non-string name/phone/email/notes -> 400 "<Field> must be text", nothing stored (no "[object Object]" rows)  [name=123:400:Name must be text | name={"a":1}:400:Name must be text | phone=["555"]:400:Phone must be text | email=true:400:Email must be text | notes={"toStrin]
+INFO  F-lone lone high surrogate in name: 201 stored="Lone ��� surrogate d027fa"
+PASS  F-lone  reservation name with a lone UTF-16 surrogate: handled (201 or 400), not a 500  [201]
+PASS  F-ck-customerName  checkout customerName: 50 emoji (100 units) accepted and stored intact; 101 units -> 400 "Name must be at most 100 characters" with NO Stripe call and no row  [400/200 stripe 45->45]
+PASS  F-ck-customerPhone  checkout customerPhone: 16 emoji (32 units) accepted and stored intact; 33 units -> 400 "Phone must be at most 32 characters" with NO Stripe call and no row  [400/200 stripe 46->46]
+PASS  F-ck-customerEmail  checkout customerEmail: 127 emoji (254 units) accepted and stored intact; 255 units -> 400 "Email must be at most 254 characters" with NO Stripe call and no row  [400/200 stripe 47->47]
+PASS  F-ck-deliveryAddress  checkout deliveryAddress: 150 emoji (300 units) accepted and stored intact; 301 units -> 400 "Delivery address must be at most 300 characters" with NO Stripe call and no row  [400/200 stripe 48->48]
+PASS  F-ck-types  checkout: object customerName -> 400 "Name must be text", no Stripe call  [400]
+
+== B: byte caps on the running production server (raw sockets, dv31-none and dv31-fake) ==
+PASS  B-res-1  /api/reservations: exactly 8192 bytes with Content-Length handled normally (201), 8193 -> 413 {"error":"Request body is too large"}  [201/413 {"error":"Request body is too large"}]
+PASS  B-res-2  /api/reservations: same boundary over chunked transfer with no Content-Length (1000-byte chunks): 201 then 413  [201/413]
+PASS  B-res-3  /api/reservations: exactly 2 rows from the two at-cap requests, none from the over-cap ones  [26->28]
+PASS  B-ck-1  /api/checkout: exactly 32768 bytes with Content-Length handled normally (200), 32769 -> 413 {"error":"Request body is too large"}  [200/413 {"error":"Request body is too large"}]
+PASS  B-ck-2  /api/checkout: same boundary over chunked transfer with no Content-Length (1000-byte chunks): 200 then 413  [200/413]
+PASS  B-ck-3  /api/checkout: exactly 2 rows from the two at-cap requests, none from the over-cap ones  [64->66]
+PASS  B-admO-1  /api/admin/orders/<id>: exactly 1024 bytes with Content-Length handled normally (400), 1025 -> 413 {"error":"Request body is too large"}  [400/413 {"error":"Request body is too large"}]
+PASS  B-admO-2  /api/admin/orders/<id>: same boundary over chunked transfer with no Content-Length (1000-byte chunks): 400 then 413  [400/413]
+PASS  B-admR-1  /api/admin/reservations/<id>: exactly 1024 bytes with Content-Length handled normally (400), 1025 -> 413 {"error":"Request body is too large"}  [400/413 {"error":"Request body is too large"}]
+PASS  B-admR-2  /api/admin/reservations/<id>: same boundary over chunked transfer with no Content-Length (1000-byte chunks): 400 then 413  [400/413]
+PASS  B-portal-1  /api/auth/portal-handoff: exactly 16384 bytes with Content-Length handled normally (400/401/403/503), 16385 -> 413 {"ok":false,"error":"payload_too_large"}  [401/413 {"ok":false,"error":"payload_too_large"}]
+PASS  B-portal-2  /api/auth/portal-handoff: same boundary over chunked transfer with no Content-Length (1000-byte chunks): 400/401/403/503 then 413  [401/413]
+INFO  B-mb bodies 8192 / 8193 bytes, notes 2698 UTF-16 units of CJK
+PASS  B-mb  reservation notes of CJK: 8192-byte body in 7-byte chunks (splitting characters) -> not 413; 8193 bytes -> 413  [400 {"error":"Notes must be at most 500 characters"} / 413]
+PASS  B-under  understated Content-Length (12) with a 40 KB body: server reads 12 bytes -> 400, the rest is not a valid request, nothing stored, server fine  [400 ]
+PASS  B-over  overstated Content-Length (5000) with a short valid body, client gives up: no response, nothing stored, server fine  [null client-timeout]
+PASS  B-gzip  gzip "bomb" (4908 bytes on the wire, 5 MB inflated) -> 400, not inflated, nothing stored  [400]
+INFO  B-te-cl Content-Length together with Transfer-Encoding: 400
+PASS  B-1mb  the #28 repro over chunked transfer: 1 MB name -> 413 JSON, nothing stored  [413]
+PASS  B-R1  READ-TIME CAP: a chunked upload that passes 8 KB and keeps going gets its 413 while still uploading, within 2 s  [413 after 7 ms, 65554 bytes sent at response (response-complete)]
+PASS  B-R2  READ-TIME CAP: a declared Content-Length of 1,000,000 is refused up front, before any body byte is sent, within 1 s  [413 after 6 ms, 0 body bytes sent]
+INFO  B-R3 (information only, see first-run harness corrections) Content-Length 1,000,000 streamed: 413, response after 984000 bytes sent, 20 ms
+PASS  B-R4  READ-TIME CAP (checkout, 32 KB): a never-ending chunked upload gets a 413 while still uploading, within 2 s  [413 after 6 ms, 65562 bytes (response-complete)]
+PASS  B-R8  READ-TIME CAP, trickle: 1 KB every 300 ms is answered 413 right after the total passes 8 KB (about 9 chunks, under 5 s), not at a timeout  [413 after 2442 ms, 8262 bytes sent]
+PASS  B-R9  READ-TIME CAP: Content-Length 5,000,000 with no body is refused up front (413, under 1 s) on checkout, both admin routes and the portal handoff  [/api/checkout:413/5ms /api/admin/orders/<id>:413/6ms /api/admin/reservations/<id>:413/7ms /api/auth/portal-handoff:413/6ms]
+PASS  B-R5  after B-R1..B-R9 nothing was stored and the servers still answer  []
+INFO  B-R6 12 MB chunked: 413 after 6 ms, 917644 bytes sent when the response arrived (103 ms total); Next body-clone warning: none
+PASS  B-R6  12 MB chunked upload: 413 long before the upload finishes (under 1 MB sent), nothing stored, and no Next middleware body-clone warning  [413 at 917644 bytes]
+INFO  B-R7 200 x 9 MB chunked uploads in waves of 20 over 16479 ms: 188 answered 413, 12 ended by a TCP reset before the 413 could be read (error:ECONNRESET); slowest end after 2109 ms; 10 memory samples, 70.33MiB before, peak 83.79MiB (first run: 105 MiB -> 389 MiB for one wave)
+FAIL  B-R7  sustained waves of 20 concurrent 9 MB uploads for 15 s: every one ends within 2 s, with 413 or (at most 2 percent) a TCP reset, never a success or a hang; container memory grows by under 50 MiB; server fine  [200 uploads, 12 resets, slowest 2109 ms, mem 70.33MiB -> 83.79MiB, 10 samples]
+
+== A: /api routes with the middleware skipped (cookie minting, scoping, forged cookies) ==
+PASS  A1  cookieless GET /api/reservations: 200 and no Set-Cookie (middleware skipped); cookieless GET /menu still gets hb_visitor  [200 api-cookie=false page-cookie=true]
+PASS  A2  cookieless POST /api/reservations: 201, the route sets hb_visitor (HttpOnly, SameSite=Lax, Path=/, Max-Age=2592000, Secure) and the row is tagged with that id  [201 hb_visitor=<v4>; Path=/; Expires=Mon, 19 Oct 2026 09:12:36 GMT; Max-Age=2592000; Secure; HttpOnly; SameSite=lax]
+PASS  A3  cookieless POST /api/checkout: 200, the route sets hb_visitor and the pending row is tagged with it  [200 tag==cookie true]
+PASS  A4  POST with a valid cookie: no new Set-Cookie, row tagged with the existing id  [201]
+PASS  A5  forged cookies on a write (8 variants: seed, SEED, url-encoded seed, uppercased real id, empty, 4 KB, seed-then-real duplicate, SQL-shaped): each gets a fresh v4 cookie and the row is tagged with it, never seed and never NULL  [201 201 201 201 201 201 201 201]
+PASS  A6  no row written through /api in this section is tagged seed or NULL  [0]
+PASS  A7  GET /api/orders/<own pending order>: owner 200 with no PII keys; another visitor, no cookie and forged seed all 404  [200/404/404/404]
+PASS  A8  admin POST on a visitor order from another visitor, no cookie, forged seed: 404; the order is unchanged  [404/404/404]
+PASS  A9  admin POST on a seed order with no cookie still works (staff demo): 200 preparing  [200]
+PASS  A10  Stripe webhook still fails closed with no signing secret (503), no cookie set  [503]
+
+== U: headless Chromium (390x844): form limits and the 503 message ==
+PASS  U1  /reservations inputs carry maxLength name 100, phone 32, email 254, notes 500  [[100,32,254,500]]
+PASS  U2  typing 150 characters into the reservation name keeps 100  [100]
+PASS  U3  /order checkout inputs carry maxLength name 100, phone 32, email 254, address 300  [text:100,tel:32,email:254,radio:-1,radio:-1,text:300]
+PASS  U4  UI checkout while Stripe fails: /api/checkout 503, the "payment service is temporarily unavailable" message is shown, page intact, no row  [503 rows 68->68]
+PASS  U5  UI checkout with Stripe up: 200, the browser is sent to the session URL (intercepted, never reaches Stripe), one pending row  [200 https://checkout.stripe.com/c/pay/cs_test_dv31_447c6cde79f4a]
+PASS  U6  no uncaught page errors in the UI run  []
+INFO  U7 real UI: 27 menu items x 12 through the item pages, form subtotal 612000 cents, default tip sent 110160; /api/checkout 400; page: Tip must be a whole number of cents from 0 to 100000
+FAIL  U7  real UI: a large cart (12 each of the priciest dishes, added through the item pages, over $6,000) checks out with the form default 18% tip  [400 tip 110160: Tip must be a whole number of cents from 0 to 100000]
+
+== C12: Stripe accepts the TLS connection and never answers (timeout path) ==
+INFO  C12 hang: 503 after 20.5 s, 2 Stripe attempt(s)
+PASS  C12  W2: Stripe that never answers: JSON 503 with no row within 25 s, after exactly 2 attempts (10 s timeout, 1 retry)  [503 after 20.5 s, 2 attempts]
+
+== K: key material ==
+PASS  K1  the fake sk_test_ keys never appear in either container log  [fake:clean test:clean]
+
+== R: runtime ==
+INFO  R-none request-aborted log lines from the harness's deliberately abandoned uploads: 0
+PASS  R-none  none: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+INFO  R-test request-aborted log lines from the harness's deliberately abandoned uploads: 0
+PASS  R-test  test: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+INFO  R-fake request-aborted log lines from the harness's deliberately abandoned uploads: 0
+PASS  R-fake  fake: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+
+TOTAL 116/119 passed  ({"PASS":116,"FAIL":3})
+```
+
+Regression harness at `ad5713e` (`regress-r2.log`, fresh containers; the
+same harness as the first run):
+
+```
+
+== P: per-visitor scope (container none, no Stripe key) ==
+PASS  P1  A first request: 200 and hb_visitor Set-Cookie  [200]
+PASS  P2  cookie flags: HttpOnly, SameSite=Lax, Path=/, Max-Age=2592000, Secure  [hb_visitor=<v4>; Path=/; Expires=Mon, 19 Oct 2026 08:54:27 GMT; Max-Age=2592000; Secure; HttpOnly; SameSite=lax]
+PASS  P3  A id is a lowercase v4 UUID  [v4]
+PASS  P4  A second request keeps its id (no new hb_visitor Set-Cookie)  [0 set-cookie]
+PASS  P5  B gets its own distinct valid id  [distinct]
+PASS  P6  A creates a reservation through the real API -> 201  [201 HR-WT58Z]
+PASS  P7  A reservation row is tagged with A visitor id  [tag==A]
+PASS  P8  B creates its own reservation -> 201, tagged B  [201 HR-VYUY5]
+PASS  P9  cookieless create -> 201, sets HttpOnly SameSite=Lax cookie, row tagged with that minted id  [201]
+INFO  A order HB-A7CDF (received), HB-C7CDF (completed); B order HB-B7CDF; legacy HB-LGCYN / RS-LGCYN (visitor_id NULL); A res HR-WT58Z; B res HR-VYUY5
+INFO  unknown-id bodies: api={"error":"Order not found"} adminOrder={"error":"Order not found"} adminRes={"error":"Reservation not found"}
+PASS  P10  A: own /reservations/<id> 200 with own name  [200]
+PASS  P11  A: own /order/confirmation/<id> 200 showing the order (item line)  [200]
+PASS  P12  A: own /api/orders/<id> 200, returns no PII fields  [id,status,statusLabel,fulfillment,updatedAt]
+PASS  P13  A: /admin/orders lists A orders (active + recent) and seed  [A_ORD,A_ORD2,seed]
+PASS  P14  A: /admin/reservations lists A booking and seed  []
+PASS  P15  A: never sees B data (admin orders/reservations)  []
+PASS  P16  A: B reservation detail 404  []
+PASS  P17  A: legacy NULL rows hidden from A admin views  []
+PASS  P18  A: legacy order /api/orders -> 404 and admin POST -> 404  []
+PASS  P19  A: legacy reservation detail 404 and admin POST 404  []
+PASS  P20  header counts are scoped: A active = B active (B has 1 own received order too), cookieless = seed-only = B - 1  [A=11 B=11]
+PASS  X1a  B (own valid cookie): A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X1b  B (own valid cookie): /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X1c  B (own valid cookie): admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X2a  cookieless: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X2b  cookieless: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X2c  cookieless: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X3a  forged seed: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X3b  forged seed: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X3c  forged seed: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X4a  forged SEED: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X4b  forged SEED: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X4c  forged SEED: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X5a  forged url-encoded seed: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X5b  forged url-encoded seed: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X5c  forged url-encoded seed: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X6a  foreign random v4: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X6b  foreign random v4: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X6c  foreign random v4: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X7a  A id uppercased: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X7b  A id uppercased: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X7c  A id uppercased: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X8a  A id, version nibble 1: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X8b  A id, version nibble 1: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X8c  A id, version nibble 1: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X9a  A id with suffix: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X9b  A id with suffix: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X9c  A id with suffix: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X10a  dup: seed then foreign v4: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X10b  dup: seed then foreign v4: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X10c  dup: seed then foreign v4: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X11a  dup: foreign v4 then seed: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X11b  dup: foreign v4 then seed: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X11c  dup: foreign v4 then seed: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X12a  empty value: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X12b  empty value: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X12c  empty value: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X13a  4 KB junk: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X13b  4 KB junk: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X13c  4 KB junk: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  X14a  SQL-shaped: A detail routes (reservation page, order confirmation, /api/orders) all 404, no A data  [404/404/404 pii-leaks=0]
+PASS  X14b  SQL-shaped: /admin, /admin/orders, /admin/reservations 200, 0 A records, seed shown, legacy hidden  [200/200/200 leaks= seed=true legacyHidden=true]
+PASS  X14c  SQL-shaped: admin POST advance/cancel on A order and cancel on A booking -> 404, body identical to unknown id  [404/404/404]
+PASS  P21  after the attack matrix A order is still received and A booking still confirmed, tags unchanged  [received/confirmed]
+INFO  harness: stale keep-alive socket on GET /api/orders/HB-VN8NX, retried once
+PASS  P22  B: 200 random guessed order codes, 0 non-seed foreign orders resolved  [foreign hits=0]
+PASS  P23  A: admin POST advance on own order -> 200 preparing  [{"id":"HB-A7CDF","status":"preparing","statusLabel":"Preparing"}]
+PASS  P24  A: admin POST seat own booking -> 200 seated  [{"id":"HR-WT58Z","status":"seated"}]
+PASS  P25  B: admin POST on a seed order -> 200 (staff demo still works)  [{"id":"HB-8BAWJ","status":"preparing","statusLabel":"Preparing"}]
+PASS  P26  every row written in this run is tagged: the only NULL rows are the 2 deliberate legacy inserts  [orders NULL=1 reservations NULL=1]
+INFO  static: SELECT ... FROM orders|reservations without the scope predicate: src\lib\orders.ts:296, src\lib\orders.ts:312, src\lib\orders.ts:332, src\lib\reservations.ts:42
+PASS  P27  static: only 4 unscoped reads remain (getOrderUnscoped, getOrderByCheckoutSession, slot counts, and the PR #31 unusedOrderId existence probe that returns no row data)  [src\lib\orders.ts:296 src\lib\orders.ts:312 src\lib\orders.ts:332 src\lib\reservations.ts:42]
+
+== K: Stripe test-key guard (per container) ==
+INFO  harness: stale keep-alive socket on GET /, retried once
+PASS  K-none-1  none: valid checkout -> 503 "not configured"  [503 {"error":"Online payment is not configured in this environment. Set STRIPE_SECRET_KEY (test mode) to enable checkout."}]
+PASS  K-none-2  none: 0 connections to api.stripe.com (443 listener) and no order row written  [hits 0->0 orders 24->24]
+PASS  K-none-3  none: garbage body -> 503 (guard runs before parsing), no crash  [503]
+PASS  K-live-1  live: valid checkout -> 503 "test-mode keys"  [503 {"error":"Online payment is disabled: this demo only runs with Stripe test-mode keys."}]
+PASS  K-live-2  live: 0 connections to api.stripe.com (443 listener) and no order row written  [hits 0->0 orders 20->20]
+PASS  K-live-3  live: garbage body -> 503 (guard runs before parsing), no crash  [503]
+PASS  K-rk-1  rk: valid checkout -> 503 "test-mode keys"  [503 {"error":"Online payment is disabled: this demo only runs with Stripe test-mode keys."}]
+PASS  K-rk-2  rk: 0 connections to api.stripe.com (443 listener) and no order row written  [hits 0->0 orders 20->20]
+PASS  K-rk-3  rk: garbage body -> 503 (guard runs before parsing), no crash  [503]
+PASS  K-rklive-1  rklive: valid checkout -> 503 "test-mode keys"  [503 {"error":"Online payment is disabled: this demo only runs with Stripe test-mode keys."}]
+PASS  K-rklive-2  rklive: 0 connections to api.stripe.com (443 listener) and no order row written  [hits 0->0 orders 20->20]
+PASS  K-rklive-3  rklive: garbage body -> 503 (guard runs before parsing), no crash  [503]
+PASS  K-pklive-1  pklive: valid checkout -> 503 "test-mode keys"  [503 {"error":"Online payment is disabled: this demo only runs with Stripe test-mode keys."}]
+PASS  K-pklive-2  pklive: 0 connections to api.stripe.com (443 listener) and no order row written  [hits 0->0 orders 20->20]
+PASS  K-pklive-3  pklive: garbage body -> 503 (guard runs before parsing), no crash  [503]
+PASS  K-live-4  live: boot log carries the [startup] refusal  []
+PASS  K-rk-4  rk: boot log carries the [startup] refusal  []
+PASS  K-rklive-4  rklive: boot log carries the [startup] refusal  []
+PASS  K-pklive-4  pklive: boot log carries the [startup] refusal  []
+PASS  K-none-4  none: no [startup] refusal (missing key is not a live key), checkout says not configured  []
+PASS  K-test-1  test (fake sk_test_): checkout passes the guard and DOES try Stripe (blocked at the pinned host)  [status 503, hits 0->2]
+INFO  K-test checkout response: 503 {"error":"The payment service is temporarily unavailable, so your order was not placed. Please try again in a moment."}
+PASS  K-test-2  test (PR #31): blocked Stripe -> 503 JSON and no order row written (was: pending row left behind)  [503 orders 20->20]
+PASS  K-test-3  test: B on A pending order with ?session_id -> 404 and 0 Stripe connections (scope check runs before reconcile)  [404 hits 2->2]
+PASS  K-test-4  test: A on own pending order with ?session_id -> 200, reconcile attempted, fails soft (pending state shown)  [200 hits 2->4]
+PASS  K-test-5  test: invalid checkout body -> 400 before any Stripe call  [400]
+PASS  K-none-scan  none: 0 sk_/rk_ keys and 0 pk_live_ in 10 pages + 17 JS chunks + 503 body; 0 exact env key values  [sk/rk x0, pk_live x0, exact x0]
+PASS  K-test-scan  test: 0 sk_/rk_ keys and 0 pk_live_ in 10 pages + 17 JS chunks + 503 body; 0 exact env key values  [sk/rk x0, pk_live x0, exact x0]
+PASS  K-live-scan  live: 0 sk_/rk_ keys and 0 pk_live_ in 10 pages + 17 JS chunks + 503 body; 0 exact env key values  [sk/rk x0, pk_live x0, exact x0]
+PASS  K-rk-scan  rk: 0 sk_/rk_ keys and 0 pk_live_ in 10 pages + 17 JS chunks + 503 body; 0 exact env key values  [sk/rk x0, pk_live x0, exact x0]
+PASS  K-rklive-scan  rklive: 0 sk_/rk_ keys and 0 pk_live_ in 10 pages + 17 JS chunks + 503 body; 0 exact env key values  [sk/rk x0, pk_live x0, exact x0]
+PASS  K-pklive-scan  pklive: 0 sk_/rk_ keys and 0 pk_live_ in 10 pages + 17 JS chunks + 503 body; 0 exact env key values  [sk/rk x0, pk_live x0, exact x0]
+
+== M: in-place migration of a pre-tagging database (container legacy) ==
+PASS  M1  prep ran on a DB without visitor_id (boot log)  []
+PASS  M2  server boot added visitor_id to orders and reservations  []
+PASS  M3  ISO-timestamp seed rows backfilled to seed (20 orders, 15 reservations)  [20/15]
+PASS  M4  app-style legacy rows kept with visitor_id NULL (2 orders, 2 reservations, incl. the 48h-old ones: not purged at boot)  [[{"id":"HB-LGCY2","v":null},{"id":"HB-LGCY3","v":null}][{"id":"RS-LGCY2","v":null},{"id":"RS-LGCY3","v":null}]]
+PASS  M5  visitor indexes created  [2]
+PASS  M6  fresh visitor: legacy names absent from admin views, seed shown  []
+PASS  M7  legacy rows: detail, API and admin POST all 404 (fresh and forged-seed cookies)  [404/404/404/404/404]
+PASS  M8  post-migration visitor write -> 201 and tagged  [201]
+
+== T: 24h retention purge (container ret) ==
+INFO  inserted per table: V25A (app format, -25h), V25B (ISO, -25h), V23 (-23h), S100 (seed, -100h), N100 (NULL, -100h); created_at V25A=2026-09-18 08:05:47 V25B=2026-09-18T08:05:47.540Z
+PASS  T1  hourly gate: 6 requests after insert do not purge (boot run already happened this hour); all 5+5 rows present  [5/5]
+PASS  T2  after restart (boot purge): orders -25h rows gone in both timestamp formats; -23h, seed -100h, NULL -100h kept  [N100,S100,V23]
+PASS  T3  after restart: reservations same outcome  [N100,S100,V23]
+PASS  T4  fresh visitor booking made minutes ago survives  [HR-6CUK6]
+PASS  T5  boot log: "[retention] deleted 2 orders and 2 reservations"  [[retention] deleted 2 orders and 2 reservations created by visitors before 2026-09-18T09:05:52.764Z]
+PASS  T6  seed rows untouched (20 + 1 orders, 15 + 1 reservations incl. the -100h seed probes)  [21/16]
+
+== E: edge sweep (container none) ==
+PASS  E1  reservations: no body -> 400  [400 {"error":"Invalid JSON"}]
+PASS  E2  reservations: garbage JSON -> 400  [400 {"error":"Invalid JSON"}]
+PASS  E3  reservations: missing fields -> 400  [400 {"error":"name, phone, partySize, date, and time are required"}]
+PASS  E4  reservations: partySize as string -> 400  [400 {"error":"partySize must be 1-12"}]
+PASS  E5  reservations: partySize 13 -> 400  [400 {"error":"partySize must be 1-12"}]
+PASS  E6  reservations: bad date format -> 400  [400 {"error":"date must be YYYY-MM-DD"}]
+PASS  E7  reservations: closed Monday -> 409  [409 {"error":"That time slot is no longer available"}]
+PASS  E8  reservations: time not a slot (03:00) -> 409  [409 {"error":"That time slot is no longer available"}]
+PASS  E9  reservations (PR #31): 1 MB name -> 413 (was 201 stored)  [413 {"error":"Request body is too large"}]
+PASS  E9b  reservations: nothing stored for the 1 MB name  [19]
+PASS  E10  reservations: HTML/unicode/apostrophes in name -> 201  [201 {"id":"HR-8FFC7"}]
+PASS  E11  owner confirmation and admin escape HTML (no raw <script>alert(1) or <img src=x), unicode intact  []
+PASS  E12  20 concurrent same-slot bookings: 201 count = remaining capacity (6 - existing), rest 409, slot never over 6  [existing 0, 201 x6, 409 x14, now 6]
+PASS  E13  20 concurrent cookieless first requests -> 20 distinct valid v4 ids  [20]
+PASS  E14  admin orders POST garbage JSON -> 400  [400 {"error":"Invalid JSON"}]
+PASS  E15  admin orders POST unknown action -> 400  [400 {"error":"action must be \"advance\" or \"cancel\""}]
+PASS  E16  admin reservations POST status "confirmed" (not allowed) -> 400  [400 {"error":"status must be one of seated, completed, cancelled"}]
+PASS  E17  admin orders GET -> 405  [405]
+PASS  E18  SQL-shaped ids on /api/orders and admin POST -> 404  [404/404]
+PASS  E19  matcher-skipped path /api/orders/<A>.png -> 404 for B and cookieless  [404/404]
+PASS  E20  unicode reservation id -> 404, not 500  [404]
+PASS  E21  owner illegal transition completed -> cancelled -> 409 (not 404, not 500)  [409 {"error":"Reservation HR-WT58Z cannot move from \"completed\" to \"cancelled\""}]
+PASS  E22  checkout 1 MB body with no key -> 503, no crash  [503]
+PASS  E23  4 KB cookie value -> 200 and replaced by a fresh v4 id  [200]
+
+== H: headless Chromium (390x844, container none) ==
+PASS  H0  browser A holds hb_visitor: httpOnly, secure, sameSite Lax, v4  [true/true/Lax]
+PASS  H0b  browser A keeps the same id across navigations (cookie sent back over http://127.0.0.1)  []
+PASS  H1  /reservations shows the demo notice (visible)  []
+PASS  H2  /order checkout form (cart with 1 item) shows the demo notice (visible)  []
+INFO  H2b checkout submit from UI: 503
+PASS  H2b  UI checkout submit with no key -> /api/checkout 503 and the not-configured message is shown in the page, no crash  [503]
+PASS  H3  browser A books through the UI and lands on its confirmation with its name  [/reservations/HR-QKFDG]
+PASS  H4  browser B opens A confirmation URL -> 404, A name absent  [404]
+PASS  H5  browser B /admin/reservations: A booking absent, scope note shown  []
+PASS  H6  browser A /admin/reservations: own booking present  []
+PASS  H7  browser A: no console errors across home, menu, reservations, order, booking, admin (the one expected 503 resource error from H2b excluded)  [Failed to load resource: the server responded with a status of 503 (Service Unavailable)]
+PASS  H8  browser B: only console error is the expected 404 resource load  [Failed to load resource: the server responded with a status of 404 (Not Found)]
+
+== Q: repo's own assertions (verify/smoke.yml, assertions/home.yml, assertions/reservations.yml) against container none ==
+PASS  Q1  smoke.yml / http_status 200  [200]
+PASS  Q2  smoke.yml / text_present Dinner by the water, minus the production  []
+PASS  Q3  smoke.yml / text_present Harbor Bistro  []
+PASS  Q4  smoke.yml / text_present Coastal-inspired, locally sourced  []
+PASS  Q5  smoke.yml / selector_present main  []
+PASS  Q6  smoke.yml / selector_present a[href='/reservations']  []
+PASS  Q7  smoke.yml / selector_present a[href='/menu']  []
+N/A  Q8  smoke.yml / header_present Strict-Transport-Security  [HSTS is added at the Cloudflare edge]
+PASS  Q9  smoke.yml /menu http_status 200  [200]
+PASS  Q10  smoke.yml /menu text_present The Menu  []
+PASS  Q11  smoke.yml /menu text_present cooked to order  []
+PASS  Q12  smoke.yml /menu selector_present main  []
+N/A  Q13  smoke.yml /menu header_present Strict-Transport-Security  [HSTS is added at the Cloudflare edge]
+PASS  Q14  smoke.yml /reservations http_status 200  [200]
+PASS  Q15  smoke.yml /reservations text_present Reserve a Table  []
+PASS  Q16  smoke.yml /reservations text_present Tables for 1 to 12  []
+PASS  Q17  smoke.yml /reservations selector_present form  []
+PASS  Q18  smoke.yml /reservations selector_present input#date  []
+PASS  Q19  smoke.yml /reservations selector_present select#partySize  []
+PASS  Q20  smoke.yml /reservations selector_present input#name  []
+PASS  Q21  smoke.yml /reservations selector_present input#phone  []
+N/A  Q22  smoke.yml /reservations header_present Strict-Transport-Security  [HSTS is added at the Cloudflare edge]
+PASS  Q23  smoke.yml /order http_status 200  [200]
+PASS  Q24  smoke.yml /order text_present cart  []
+PASS  Q25  smoke.yml /order selector_present main  []
+N/A  Q26  smoke.yml /order header_present Strict-Transport-Security  [HSTS is added at the Cloudflare edge]
+PASS  Q27  smoke.yml /about http_status 200  [200]
+PASS  Q28  smoke.yml /about text_present Harbor Bistro  []
+PASS  Q29  smoke.yml /about selector_present main  []
+N/A  Q30  smoke.yml /about header_present Strict-Transport-Security  [HSTS is added at the Cloudflare edge]
+PASS  Q31  smoke.yml /api/reservations?date=2026-07-04 http_status 200  [200]
+PASS  Q32  smoke.yml /api/reservations?date=2026-07-04 json_path_equals $.slots  [["16:00","16:30","17:00","17:30","18:00","18:30","19:00","19]
+PASS  Q33  assertions/home.yml / http_status 200  [200]
+N/A  Q34  assertions/home.yml / header_present Strict-Transport-Security  [HSTS is added at the Cloudflare edge]
+PASS  Q35  assertions/home.yml / text_present Dinner by the water, minus the production  []
+PASS  Q36  assertions/home.yml / text_present Coastal-inspired, locally sourced, weeknight-easy.  []
+PASS  Q37  assertions/home.yml / text_present Reserve a Table  []
+PASS  Q38  assertions/home.yml / text_present See the Menu  []
+PASS  Q39  assertions/home.yml / text_present This week  []
+PASS  Q40  assertions/home.yml / text_present Good fish, short menu, honest hours  []
+PASS  Q41  assertions/home.yml / text_present 412 Harborline Drive  []
+PASS  Q42  assertions/home.yml / text_present Tue-Sun from 4pm  []
+PASS  Q43  assertions/home.yml / text_present Harbor Bistro  []
+PASS  Q44  assertions/home.yml / selector_present main  []
+PASS  Q45  assertions/home.yml / selector_present section  []
+PASS  Q46  assertions/home.yml / selector_present a[href='/reservations']  []
+PASS  Q47  assertions/home.yml / selector_present a[href='/menu']  []
+PASS  Q48  assertions/home.yml / selector_present ul li a[href^='/menu/']  []
+PASS  Q49  assertions/home.yml / selector_present header  []
+PASS  Q50  assertions/home.yml / selector_present [data-testid='demo-banner'], footer, [class*='DemoBanner'], [class*='demo']  []
+PASS  Q51  assertions/home.yml / lcp_under_ms 1500 (local origin)  [140 ms]
+PASS  Q52  assertions/home.yml / no_console_errors   []
+SKIP  Q53  assertions/home.yml / axe_no_critical   [axe-core not in harness]
+PASS  Q54  assertions/reservations.yml /reservations http_status 200  [200]
+N/A  Q55  assertions/reservations.yml /reservations header_present Strict-Transport-Security  [HSTS is added at the Cloudflare edge]
+PASS  Q56  assertions/reservations.yml /reservations text_present Reserve a Table  []
+PASS  Q57  assertions/reservations.yml /reservations text_present Tables for 1 to 12  []
+PASS  Q58  assertions/reservations.yml /reservations text_present Walk-ins always welcome at the bar  []
+PASS  Q59  assertions/reservations.yml /reservations text_present Hours  []
+PASS  Q60  assertions/reservations.yml /reservations text_present Tuesday  []
+PASS  Q61  assertions/reservations.yml /reservations selector_present form  []
+PASS  Q62  assertions/reservations.yml /reservations selector_present input#date  []
+PASS  Q63  assertions/reservations.yml /reservations selector_present select#partySize  []
+PASS  Q64  assertions/reservations.yml /reservations selector_present input#name  []
+PASS  Q65  assertions/reservations.yml /reservations selector_present input#phone  []
+PASS  Q66  assertions/reservations.yml /reservations selector_present input#email  []
+PASS  Q67  assertions/reservations.yml /reservations selector_present textarea#notes  []
+PASS  Q68  assertions/reservations.yml /reservations selector_present button[type='submit']  []
+PASS  Q69  assertions/reservations.yml /reservations selector_present select#partySize option[value='12']  []
+PASS  Q70  assertions/reservations.yml /api/reservations?date=2026-07-07 json_path_equals $.isClosed  [false]
+PASS  Q71  assertions/reservations.yml /api/reservations?date=2026-07-06 json_path_equals $.isClosed  [true]
+PASS  Q72  assertions/reservations.yml /reservations no_console_errors   []
+SKIP  Q73  assertions/reservations.yml /reservations axe_no_critical   [axe-core not in harness]
+
+== R: runtime ==
+PASS  R-none  none: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+PASS  R-test  test: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+PASS  R-live  live: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+PASS  R-rk  rk: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+PASS  R-rklive  rklive: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+PASS  R-pklive  pklive: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+PASS  R-ret  ret: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+PASS  R-legacy  legacy: running, 0 restarts, / 200, no unexpected error lines  [running 0; / 200; unexpected x0 ]
+
+TOTAL 221/221 passed  ({"PASS":221,"FAIL":0,"N/A":7,"SKIP":2})
+```
+
+Isolation probe for the resets in B-R7 (`b7probe.mjs`: 8 waves of 20
+concurrent 9 MB uploads, then 40 sequential ones, against `dv31-none`):
+
+```
+{
+ "413|server-end": 123,
+ "413|response-complete": 35,
+ "413|error:ECONNRESET": 1,
+ "null|error:ECONNRESET": 1,
+ "example": "closedBy=error:ECONNRESET tClose=199 written=983189 raw=\"\""
+}
+sequential {"413|server-end":39,"413|error:ECANCELED":1}
+```
+
+Re-verify combined TOTAL: **337 of 340 checks passed** (attack 116/119,
+regression 221/221), plus 7 N/A, 2 SKIP, 136/136 unit tests, 4/4 probe
+checks, and 6/6 on the builder's server suite (warm).
+
+### 0.6 Theater Check (re-verify claims)
+
+| Builder claimed (fix commit) | Verification found | Verdict |
+|---|---|---|
+| B1: the middleware matcher skips `api/`, so the cap acts on a real server | compiled matcher confirmed. On the production image: declared 1 MB gets 413 in 6 ms with 0 body bytes sent (B-R2); endless chunked gets 413 in 7 ms after 64 KB, on reservations (B-R1) and checkout (B-R4); a 1 KB / 300 ms trickle gets 413 at 8262 bytes (B-R8); declared 5 MB on checkout, both admin routes and the portal gets 413 in 5 to 7 ms (B-R9); 12 MB gets 413 in 6 ms with no Next clone warning (B-R6); 200 x 9 MB over 16 s kept memory at 70 to 84 MiB (B-R7) | CONFIRMED |
+| `middlewareClientMaxBodySize` 64kb as defence in depth | present in the built server (65536). With the old matcher it does not stop the hang (old middleware + 64kb: 4/6 suite failures) | CONFIRMED as described (limits memory only) |
+| /api works without the middleware | routes mint and set `hb_visitor` with the full attributes, and tag rows with it (A2, A3); a valid cookie is kept (A4); 8 forged cookie variants each get a fresh v4, and never write seed or NULL rows (A5, A6); GET and admin scoping hold (A7 to A9); webhook still fails closed (A10); GET /api sets no cookie while pages still do (A1); PR #28 regression 221/221 | CONFIRMED |
+| W2: Stripe timeout 10 s, 1 retry | hung fake Stripe: 503, no row, 20.5 s, 2 attempts (C12) | CONFIRMED |
+| W3: `unusedOrderId` wrapped (JSON 500) | V4 now returns the JSON 500 with 0 Stripe calls | CONFIRMED |
+| W4: `parseTipCents`, a non-negative integer no larger than 100000, else 400 | exactly so, before Stripe, with no row (D1 to D8b) | CONFIRMED as specified; **but see U7: it breaks the form's own default tip on large orders** |
+| W5: add-on ids de-duplicated | x200 equals x1 in price and in stored selections (D9) | CONFIRMED |
+| real-server suite: 4 of 6 fail against main's middleware | 4 of 6 failed with both old-middleware builds; 6 of 6 at head when warm | CONFIRMED (cold-start flake noted) |
+| 136 unit tests, plus 6 server tests | 136/136; server suite as above | CONFIRMED |
+
+### 0.7 Re-verify Blockers
+
+**RB1. The tip cap refuses the order form's own default tip on large orders
+(new in `ad5713e`).**
+- **Where:** `src/app/order/page.tsx` computes
+  `tipCents = Math.round(subtotalCents * tipPct)` with presets 0 / 15 / 18 /
+  20% and 18% preselected. It does not know about `MAX_TIP_CENTS`.
+- **Threshold:** any cart over $5,555.56 at the default 18% (over $5,000 at
+  20%) now fails checkout with a 400 whose message ("Tip must be a whole
+  number of cents from 0 to 100000") is shown to the visitor.
+- **Reachable through the UI:** 12 of each of 27 dishes gets there (U7). The
+  cart allows 12 per line. D10's cart (50 lines x 12 of one $14 dish) is
+  $8,400; its log label calls that the "largest legal cart", which
+  overstates it, since carts of pricier dishes go higher.
+- **Before this commit:** the same order went to Stripe and succeeded.
+- **Recommended fix:** make the server bound relative to the order, for
+  example `tip <= max(MAX_TIP_CENTS, subtotalCents)`, which no preset can
+  exceed. Or clamp the form's tip to `MAX_TIP_CENTS` and show the clamped
+  amount. Either way, add a test that the largest legal cart with the 20%
+  preset checks out.
+- **Agent tier:** Tier-2 implementer. The merge stays Tier-3, with a
+  re-verify of D10 and U7.
+
+### 0.8 Re-verify Warnings
+
+- **Over-cap uploads under load sometimes see a TCP reset instead of the 413
+  (B-R7).**
+  - 12 of 200 in the 16 s run, and 1 of 160 in the isolation probe.
+    Sequential uploads always read the 413.
+  - Every upload ended within 2.1 s, none succeeded or hung, and memory
+    stayed flat. So this is not a cap failure.
+  - Cause: the server closes a socket that still has unread upload data, and
+    the kernel sends a reset that can discard the response.
+  - Only over-cap clients see it. The form limits keep legitimate requests
+    far under the caps.
+  - The check failed on my own thresholds (2% and 2 s), which I set before
+    running and did not tune afterwards.
+  - Optional fix: read and discard a bounded amount (for example 64 KB)
+    before closing, or accept the behaviour. Tier-2 implementer, low
+    priority.
+- **The server suite has a cold-start timing flake.** Its first case failed
+  at 1401 ms against a 1000 ms limit on the first run after a build, then
+  passed 3 out of 3. Fix: warm the POST route in `beforeAll` (one small
+  valid POST), or allow 2 s. Tier-1 implementer.
+- **No CI runs vitest.** Neither the 136 unit tests nor the server suite run
+  in `verify.yml`, so the real-server gate only protects a merge if someone
+  runs it by hand. Recommend a CI job: `npm ci` (needs the GitHub Packages
+  token as a secret for `@paradigm-codes/auth`), `npm test`,
+  `npm run build`, then the server suite. Tier-2 implementer; the workflow
+  change is Drew-gated.
+- **The CI deep-verify gate is still the any-report version** (first-run
+  warning). It stays green on this PR despite this FAIL report. Merge
+  `chore/deep-gate-per-pr` first.
+- **Future middleware on `/api/` would silently bring back the hang.** The
+  64kb setting does not prevent it (0.4). The suite's
+  "middleware on pages but not /api/" case is the guard, which is one more
+  reason to wire it into CI.
+
+### 0.9 Re-verify coverage gaps
+
+Unchanged from the first run:
+- headed Chrome not run;
+- real Stripe not run (the fake Stripe covered the success, error, hang and
+  collision paths);
+- live proxy not probed;
+- axe skipped;
+- Chromium only.
+
+### 0.10 Re-verify cleanup
+
+- All `dv31-*` containers and the `demo-harborbistro:dv31` image were
+  removed.
+- The npmrc was deleted after the build.
+- The temporary probe test file and the temporary middleware and config
+  swaps were removed or restored, and `git status --porcelain` was empty
+  before the commit.
+- The local `.next` build was rebuilt at head.
+- The builder's server suite stops its own server process in `afterAll`.
+- This report is the only file in the commit.
+
+---
+
+# History: first run at 0a83724 (2026-09-19)
+
+Everything below is the original report, kept unchanged except for its
+header lines. That run's verdict was FAIL (tested SHA
+`0a837249dd04a476928880164f831044b6a5e2cb`). Its blocker B1 and warnings W2 to
+W5 are addressed by `ad5713e`, as shown above.
+
+
+## Deep Verify: PR #31 checkout 503 with no order row, public request body caps (2026-09-19) [first run]
+
+First-run verdict: FAIL
+First-run tested commit: 0a837249dd04a476928880164f831044b6a5e2cb
 
 Claim (1), the payment path, held under every attack: when Stripe is refused,
 reset, rejects, errors, returns garbage, returns no URL or never answers,
