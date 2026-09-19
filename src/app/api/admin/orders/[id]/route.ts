@@ -6,6 +6,7 @@ import {
   cancelActiveOrder,
 } from "@/lib/orders";
 import { ORDER_STATUS_LABELS } from "@/lib/types";
+import { BODY_LIMITS, asRecord, readJsonBody } from "@/lib/request-body";
 import { scopeFromRequest } from "@/lib/visitor";
 
 export const runtime = "nodejs";
@@ -26,12 +27,11 @@ export const runtime = "nodejs";
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const scope = scopeFromRequest(req);
-  let body: { action?: string };
-  try {
-    body = (await req.json()) as { action?: string };
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  const read = await readJsonBody(req, BODY_LIMITS.adminAction);
+  if (!read.ok) {
+    return NextResponse.json({ error: read.error }, { status: read.status });
   }
+  const body = (asRecord(read.body) ?? {}) as { action?: string };
 
   if (body.action !== "advance" && body.action !== "cancel") {
     return NextResponse.json(

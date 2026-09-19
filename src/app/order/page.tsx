@@ -5,6 +5,7 @@ import Link from "next/link";
 import { formatPrice } from "@/lib/menu-format";
 import { useCart } from "@/components/cart/CartProvider";
 import { DemoDataNotice } from "@/components/site/DemoDataNotice";
+import { FIELD_LIMITS } from "@/lib/request-body";
 
 const TIP_PRESETS = [0, 0.15, 0.18, 0.2];
 
@@ -175,6 +176,7 @@ export default function OrderPage() {
                 type="text"
                 required
                 value={name}
+                maxLength={FIELD_LIMITS.name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full rounded-lg border border-harbor-line bg-white px-3 py-2"
               />
@@ -184,6 +186,7 @@ export default function OrderPage() {
                 type="tel"
                 required
                 value={phone}
+                maxLength={FIELD_LIMITS.phone}
                 onChange={(e) => setPhone(e.target.value)}
                 className="w-full rounded-lg border border-harbor-line bg-white px-3 py-2"
               />
@@ -192,6 +195,7 @@ export default function OrderPage() {
               <input
                 type="email"
                 value={email}
+                maxLength={FIELD_LIMITS.email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-lg border border-harbor-line bg-white px-3 py-2"
               />
@@ -230,6 +234,7 @@ export default function OrderPage() {
                 type="text"
                 required
                 value={address}
+                maxLength={FIELD_LIMITS.address}
                 onChange={(e) => setAddress(e.target.value)}
                 className="mt-2 w-full rounded-lg border border-harbor-line bg-white px-3 py-2"
               />

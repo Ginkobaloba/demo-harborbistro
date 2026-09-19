@@ -11,6 +11,8 @@ import type {
 } from "./types";
 
 export const MAX_LINE_QUANTITY = 12;
+/** Distinct cart lines per order; bounds the pricing work one request can cause. */
+export const MAX_CART_LINES = 50;
 
 /** Untrusted cart line from the client. Prices are deliberately NOT accepted. */
 export type RawCartLine = {
@@ -111,6 +113,9 @@ export function priceCart(rawLines: unknown): PricedCart {
   if (!Array.isArray(rawLines) || rawLines.length === 0) {
     throw new CartError("Your cart is empty");
   }
+  if (rawLines.length > MAX_CART_LINES) {
+    throw new CartError(`A single order can hold at most ${MAX_CART_LINES} lines`);
+  }
 
   const lines: OrderLineItem[] = [];
   for (const raw of rawLines as RawCartLine[]) {
@@ -201,6 +206,10 @@ function rowToOrder(row: OrderRow): Order {
 }
 
 export type CreateOrderInput = {
+  /** Pre-minted id (see unusedOrderId). Minted here when omitted. */
+  id?: string;
+  /** Stripe Checkout Session id, when the session was opened before the insert. */
+  stripeCheckoutSessionId?: string | null;
   lines: OrderLineItem[];
   subtotalCents: number;
   tipCents: number;
@@ -219,18 +228,18 @@ export type CreateOrderInput = {
  * once Stripe confirms payment (status moves to `received`).
  */
 export function createPendingOrder(input: CreateOrderInput): Order {
-  const id = newOrderId();
+  const id = input.id ?? newOrderId();
   const totalCents = input.subtotalCents + input.tipCents;
   getDb()
     .prepare(
       `INSERT INTO orders (
          id, customer_name, customer_phone, customer_email, fulfillment,
          delivery_address, items, subtotal_cents, tip_cents, total_cents, status,
-         visitor_id
+         stripe_checkout_session_id, visitor_id
        ) VALUES (
          @id, @customerName, @customerPhone, @customerEmail, @fulfillment,
          @deliveryAddress, @items, @subtotalCents, @tipCents, @totalCents, 'pending',
-         @visitorId
+         @stripeCheckoutSessionId, @visitorId
        )`,
     )
     .run({
@@ -244,9 +253,25 @@ export function createPendingOrder(input: CreateOrderInput): Order {
       subtotalCents: input.subtotalCents,
       tipCents: input.tipCents,
       totalCents,
+      stripeCheckoutSessionId: input.stripeCheckoutSessionId ?? null,
       visitorId: input.visitorId,
     });
   return getOrderUnscoped(id)!;
+}
+
+/**
+ * Mint an order id no existing row uses. Checkout mints the id before it
+ * opens the Stripe session (the session carries it) and inserts the row only
+ * afterwards (D-017), so it checks for a collision up front rather than
+ * letting the later insert fail on the primary key.
+ */
+export function unusedOrderId(): string {
+  const exists = getDb().prepare("SELECT 1 FROM orders WHERE id = ?");
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const id = newOrderId();
+    if (!exists.get(id)) return id;
+  }
+  throw new Error("Could not mint an unused order id");
 }
 
 /**

@@ -293,3 +293,37 @@ see.
   most hourly, triggered from `getDb()`. `npm run db:purge-visitors` runs it
   on request (`DRY_RUN=1` to count only). Legacy NULL rows are only removed
   with `INCLUDE_LEGACY=1`, an explicit operator decision.
+
+## D-017: Checkout writes the order only after Stripe; public writes are size-capped (2026-09-19)
+
+A deep verify of #28 found two pre-existing defects: with Stripe unreachable,
+`POST /api/checkout` answered a bare 500 with an empty body and left a tagged
+`pending` order row behind; and nothing capped a public request body, so a
+1 MB reservation name was stored.
+
+- **Order row after the session, not before.** better-sqlite3 transactions are
+  synchronous and cannot span the `await` on Stripe, so "roll back on
+  failure" would really be a compensating delete. Instead checkout mints the
+  order id first (`unusedOrderId()`, which also checks the id is free), opens
+  the Stripe session with it (client reference, metadata, success/cancel
+  URLs), and only then inserts the `pending` row with the session id in the
+  same statement. Any failure in session creation, including a session with
+  no hosted URL, returns 503 with a fixed JSON message and writes nothing.
+  The log line carries only the Stripe error type/code, never the message.
+  If the insert itself fails after Stripe succeeded, the client gets a JSON
+  500 and the unused test-mode session expires on its own. No webhook can
+  reference the order before the row exists: payment only starts after the
+  client is redirected, which happens after the insert.
+- **Byte caps on every public write route** via `readJsonBody`
+  (`src/lib/request-body.ts`): checkout 32 KB, reservations 8 KB, admin
+  actions 1 KB, portal handoff 16 KB. A declared `Content-Length` over the
+  cap is refused up front, and the stream is counted as it is read so a
+  chunked or understated upload is cut off at the cap. Over the cap is 413;
+  unparseable or non-object JSON is 400. The Stripe webhook is untouched: it
+  must read the exact raw body for signature verification (D-015) and stores
+  no visitor text.
+- **Field limits** (`FIELD_LIMITS`): name 100, phone 32, email 254, address
+  300, notes 500 characters, measured after trimming in UTF-16 units, the
+  same unit as the forms' `maxLength` (which now mirror them). Non-string
+  values are refused rather than stringified. Carts are limited to
+  `MAX_CART_LINES` (50) lines.

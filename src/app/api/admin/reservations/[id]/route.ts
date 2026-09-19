@@ -5,6 +5,7 @@ import {
   setReservationStatus,
 } from "@/lib/reservations";
 import type { ReservationStatus } from "@/lib/types";
+import { BODY_LIMITS, asRecord, readJsonBody } from "@/lib/request-body";
 import { scopeFromRequest } from "@/lib/visitor";
 
 export const runtime = "nodejs";
@@ -24,12 +25,11 @@ const ALLOWED: ReservationStatus[] = ["seated", "completed", "cancelled"];
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const scope = scopeFromRequest(req);
-  let body: { status?: string };
-  try {
-    body = (await req.json()) as { status?: string };
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  const read = await readJsonBody(req, BODY_LIMITS.adminAction);
+  if (!read.ok) {
+    return NextResponse.json({ error: read.error }, { status: read.status });
   }
+  const body = (asRecord(read.body) ?? {}) as { status?: string };
 
   const status = body.status as ReservationStatus;
   if (!ALLOWED.includes(status)) {
