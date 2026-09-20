@@ -36,26 +36,33 @@ describe("check-decisions", () => {
     ].join("\n");
     const problems = checkDecisions(text);
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/D-019 appears 2 times \(lines 4, 7\)/);
+    expect(problems[0]).toMatch(/id 19 appears 2 times \(D-019 on line 4, D-019 on line 7\)/);
   });
 
   it("reports every duplicated id, not just the first", () => {
     const text = ["## D-001: a", "## D-001: b", "## D-002: c", "## D-002: d", "## D-002: e"].join("\n");
     const problems = checkDecisions(text);
     expect(problems).toHaveLength(2);
-    expect(problems.some((p) => p.includes("D-001 appears 2 times"))).toBe(true);
-    expect(problems.some((p) => p.includes("D-002 appears 3 times"))).toBe(true);
+    expect(problems.some((p) => p.includes("id 1 appears 2 times"))).toBe(true);
+    expect(problems.some((p) => p.includes("id 2 appears 3 times"))).toBe(true);
   });
 
   it("is not fooled by CRLF line endings", () => {
     const text = "## D-001: a\r\n## D-001: b\r\n";
     const problems = checkDecisions(text);
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/D-001 appears 2 times \(lines 1, 2\)/);
+    expect(problems[0]).toMatch(/id 1 appears 2 times \(D-001 on line 1, D-001 on line 2\)/);
   });
 
   it("ignores headings that are not decision ids", () => {
     const text = ["## Some other heading", "## D-1: numeric id still counts", "### D-1: wrong heading level"].join("\n");
     expect(checkDecisions(text)).toEqual([]);
+  });
+
+  it("treats inconsistently padded ids as the same decision (D-019 vs D-19)", () => {
+    const text = ["## D-019: padded (2026-09-19)", "## D-19: unpadded, same decision (2026-09-19)"].join("\n");
+    const problems = checkDecisions(text);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/id 19 appears 2 times \(D-019 on line 1, D-19 on line 2\)/);
   });
 });

@@ -34,14 +34,18 @@ const HEADING_RE = /^## D-(\d+)\b/;
  */
 export function checkDecisions(text, label = "decisions.md") {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
-  /** @type {Map<string, number[]>} */
+  // Keyed by the NUMERIC value, not the matched digit string: "D-019" and
+  // "D-19" name the same decision with inconsistent padding, and that is
+  // exactly the kind of collision this check exists to catch, not a reason
+  // to treat them as two different ids.
+  /** @type {Map<number, {raw: string, line: number}[]>} */
   const seen = new Map();
   lines.forEach((line, i) => {
     const m = HEADING_RE.exec(line);
     if (!m) return;
-    const id = m[1];
+    const id = Number(m[1]);
     const at = seen.get(id) ?? [];
-    at.push(i + 1);
+    at.push({ raw: m[1], line: i + 1 });
     seen.set(id, at);
   });
 
@@ -50,9 +54,10 @@ export function checkDecisions(text, label = "decisions.md") {
     problems.push(`${label}: no "## D-<n>" decision headings found; nothing was checked`);
     return problems;
   }
-  for (const [id, lineNumbers] of seen) {
-    if (lineNumbers.length > 1) {
-      problems.push(`${label}: D-${id} appears ${lineNumbers.length} times (lines ${lineNumbers.join(", ")})`);
+  for (const [id, occurrences] of seen) {
+    if (occurrences.length > 1) {
+      const spots = occurrences.map((o) => `D-${o.raw} on line ${o.line}`).join(", ");
+      problems.push(`${label}: id ${id} appears ${occurrences.length} times (${spots})`);
     }
   }
   return problems;
@@ -68,7 +73,7 @@ export function runCheck(path = DEFAULT_PATH, log = console.log, err = console.e
   const problems = checkDecisions(text, label);
   for (const p of problems) err(`decisions: ${p}`);
   const idCount = new Set(
-    (text.match(/^## D-\d+\b/gm) ?? []).map((h) => /^## D-(\d+)/.exec(h)[1]),
+    (text.match(/^## D-\d+\b/gm) ?? []).map((h) => Number(/^## D-(\d+)/.exec(h)[1])),
   ).size;
   log(`decisions: ${idCount} unique id(s), ${problems.length} problem(s).`);
   return problems.length ? 1 : 0;
