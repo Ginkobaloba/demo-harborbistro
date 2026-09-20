@@ -305,15 +305,10 @@ export const SEED_MENU: SeedMenuItem[] = [
     isGlutenFree: true,
     customizationOptions: [SPICE_LEVEL],
   },
-  {
-    slug: "smoked-whitefish-dip",
-    name: "Smoked Whitefish Dip",
-    course: "snacks",
-    description:
-      "Great Lakes whitefish smoked in-house, folded with creme fraiche and dill. House crackers, pickled red onion.",
-    priceCents: 1300,
-    photoUrl: unsplash("photo-1541529086526-db283c563270"),
-  },
+  // SCRATCH: smoked-whitefish-dip removed here on purpose, to prove the
+  // "Seed the database" CI step (db:seed + db:verify) can fail. db:verify
+  // asserts exactly 60 menu items; this drops SEED_MENU to 59, unrelated
+  // to tsc/lint/unit tests/build/test:server. Restored in the next commit.
   {
     slug: "crispy-walleye-bites",
     name: "Crispy Walleye Bites",

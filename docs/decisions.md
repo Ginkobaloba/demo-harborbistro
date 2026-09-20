@@ -580,10 +580,3 @@ tiles receive a token, or the portal moves harborbistro to a top-level
 redirect, these comments and this entry are stale -- check that file
 before assuming this route, page, or `readHarborSession` are still dead
 code.
-
-## D-020: SCRATCH duplicate id, proves the decisions-check CI step can fail (2026-09-19)
-
-This heading deliberately reuses D-020's id (docs/decisions.md already has
-one earlier in this file) to reproduce the real 2026-09-19 collision where
-two branches both claimed D-019 and merged with no conflict. Reverted in
-the next commit.
