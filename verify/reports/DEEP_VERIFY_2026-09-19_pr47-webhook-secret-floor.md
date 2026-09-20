@@ -297,6 +297,23 @@ Two further order-status mutators, for completeness:
   `cancelActiveOrder` throws `OrderTransitionError` unless the order is already
   in `ACTIVE_ORDER_STATUSES`. So it can cancel an already-paid order within the
   visitor's own scope, which is the demo's intent.
+
+  That `advanceOrder` cannot mark a `pending` order paid was checked in the
+  function that decides the transition, not inferred from the `ORDER_FLOW`
+  comment:
+
+  ```ts
+  export function nextOrderStatus(current: OrderStatus): OrderStatus | null {
+    const idx = (ORDER_FLOW as readonly string[]).indexOf(current);
+    if (idx === -1 || idx === ORDER_FLOW.length - 1) return null;
+    return ORDER_FLOW[idx + 1];
+  }
+  ```
+
+  `ORDER_FLOW` is `["received", "preparing", "ready", "completed"]`, so
+  `indexOf("pending") === -1`, `nextOrderStatus` returns `null`, and
+  `advanceOrder` throws `OrderTransitionError` before touching the row. The
+  admin route answers 409. There is no `pending -> received` edge there.
 - No other `UPDATE orders SET status` exists in `src/`.
 
 **No unauthenticated path sets `status = 'received'`.** The `pending -> received`
@@ -438,6 +455,25 @@ statements, not of the event pipeline. Worth a follow-up card.
 
 The one genuine outbound Stripe call in the repo -- `sessions.retrieve` on the
 confirmation page -- lives on `main` and is untouched by this branch.
+
+### Cross-repo survey in the PR body: CONFIRMED with a scope caveat
+
+The PR claims only Harbor has a signature-verified mutation path. Re-grepped
+independently across the sibling checkouts:
+
+- `C:\dev\demo-axlepoint` -- zero hits for `constructEvent|whsec|webhook`
+  (case-insensitive, whole tree).
+- `C:\dev\demo-slatewell` -- one hit for
+  `constructEvent|whsec|webhooks/stripe|STRIPE_WEBHOOK_SECRET`, in
+  `docs/handoffs/HANDOFF_2026-06-29_stripe-elements-and-admin-screens.md`.
+  Prose in a historical handoff, no code, no route.
+- `C:\dev\lumen-analytics` -- 10 hits, all `LUMEN_SLACK_WEBHOOK_URL`. Confirmed
+  outbound: `src/lib/alerting.ts:160-177` reads the URL and `POST`s to it. No
+  inbound endpoint, no verification, nothing mutated by an inbound event.
+
+Caveat: this was run against the **current local working copies**, not against
+the SHAs the builder was briefed with. The conclusion reproduces; the exact
+revisions do not. **CONFIRMED for the checkouts as they stand now.**
 
 ---
 
