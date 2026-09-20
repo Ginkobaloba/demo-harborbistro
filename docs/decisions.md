@@ -536,3 +536,47 @@ no check that the build matches the checkout.
 - **Verification.** Proved by hand per the PR: build, run `npm run
   test:server`, confirm green; commit a change without rebuilding, confirm
   the suite fails and names both shas; rebuild, confirm green again.
+
+## D-021: Label the portal-handoff machinery as unreached, do not wire it (2026-09-19)
+
+Docs-and-comments only; no behavior, logic, or test changes in this entry.
+
+The portal-handoff route (`src/app/api/auth/portal-handoff/route.ts` and
+`handler.ts`), the client handoff page (`src/app/portal/handoff/page.tsx`),
+and `readHarborSession` (`src/lib/portal-session.ts`) are complete, tested
+machinery that is never exercised in production. Two independent
+observations agreed on this tonight:
+
+- The Opus deep verify of PR #37 (`verify/reports/DEEP_VERIFY_2026-09-19_pr37-customer-session-claims.md`)
+  found `readHarborSession` has zero callers anywhere in the repo, static
+  analysis and grep.
+- The portal owner (the session that owns portal-shell) reports that
+  harborbistro is a `shape: "iframe"` tile in the portal, the iframe path
+  renders the frame with no fragment, and so the portal never navigates a
+  visitor to `/portal/handoff#portal_token=...` at all. This route and
+  page have no live caller from the portal side, independent of anything
+  in this repo.
+
+Two directions landing on the same conclusion is why this is labelled with
+confidence rather than left as an open question.
+
+**What is not being done, and why.** We are not wiring iframe identity.
+A URL fragment cannot cross into an iframe the way it crosses a top-level
+redirect, so making this live needs either a `postMessage` handshake or a
+server-side token exchange, either of which is a new feature with its own
+design (CSP/`sandbox` implications, replay handling, origin checks). That
+design belongs to the portal side, not to a docs-only pass in this repo.
+
+**What changed.** A doc comment was added at the top of each site above,
+attributing the "unreached" status to `docs/PORTAL_GATE_CONTRACT.md` in
+portal-shell rather than restating the iframe-tile reason as a standalone
+fact in this repo -- the portal side owns that decision and can change it
+without this repo's comments going stale silently. Each comment names the
+date (2026-09-19) so a reader can tell whether it is current.
+
+**If this goes stale.** The portal's tile shape is not this repo's to
+track. If `docs/PORTAL_GATE_CONTRACT.md` (portal-shell) later says iframe
+tiles receive a token, or the portal moves harborbistro to a top-level
+redirect, these comments and this entry are stale -- check that file
+before assuming this route, page, or `readHarborSession` are still dead
+code.

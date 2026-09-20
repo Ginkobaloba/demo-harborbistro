@@ -12,6 +12,8 @@ import {
 import { BODY_LIMITS, readJsonBody } from "@/lib/request-body";
 
 /**
+ * UNREACHED in production as of 2026-09-19; see the note in ./route.ts.
+ *
  * Portal handoff logic (chunk 4b), kept out of route.ts so the route file can
  * export only the HTTP method handlers Next.js permits (a non-handler export
  * there fails `next build`'s route type check). The handler is exported here

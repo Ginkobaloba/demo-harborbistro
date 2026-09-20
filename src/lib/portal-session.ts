@@ -136,6 +136,12 @@ export function harborSessionCookieAttributes(expiresAt: Date) {
 /**
  * Read the current session from the request cookies. Returns null if no
  * cookie is set or the token does not verify.
+ *
+ * Has zero production callers as of 2026-09-19 (confirmed by the #37 deep
+ * verify and re-checked here); the portal-handoff route that would create
+ * a session for this to read is itself unreached, see the note in
+ * `src/app/api/auth/portal-handoff/route.ts`. Tested but not exercised;
+ * do not treat a passing test here as evidence this path runs in prod.
  */
 export async function readHarborSession(): Promise<HarborSessionPayload | null> {
   const jar = await cookies();
