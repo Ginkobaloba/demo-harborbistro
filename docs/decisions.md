@@ -536,3 +536,10 @@ no check that the build matches the checkout.
 - **Verification.** Proved by hand per the PR: build, run `npm run
   test:server`, confirm green; commit a change without rebuilding, confirm
   the suite fails and names both shas; rebuild, confirm green again.
+
+## D-020: SCRATCH duplicate id, proves the decisions-check CI step can fail (2026-09-19)
+
+This heading deliberately reuses D-020's id (docs/decisions.md already has
+one at the top of this section) to reproduce the real 2026-09-19 collision
+where two branches both claimed D-019 and merged with no conflict.
+Reverted in the next commit.
