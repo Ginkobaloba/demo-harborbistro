@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getWebhookSecret } from "@/lib/stripe";
+import {
+  WEBHOOK_SECRET_PROBLEM_MESSAGES,
+  readWebhookSecretProblem,
+} from "@/lib/webhook-secret";
 import { handleStripeEvent } from "@/lib/stripe-webhook";
 
 // Webhook signature verification needs the raw body and the Node.js runtime.
@@ -11,13 +15,25 @@ let warnedUnconfigured = false;
 /**
  * POST /api/webhooks/stripe
  *
- * Fails closed: with no STRIPE_WEBHOOK_SECRET configured the endpoint refuses
- * every request (503) without reading or parsing the body. An unsigned event
- * is never trusted. With the secret set, the Stripe signature is verified
- * against the RAW body before the event is applied; a missing or invalid
- * signature returns 400. A verified event always returns 200 so Stripe does
- * not retry needlessly. Event handling is idempotent (state transitions are
- * guarded on `status = 'pending'`), so a replayed signed event is a no-op.
+ * THE GUARD, and the property it holds: order state never changes as a result
+ * of an event whose signature was not verified against the configured signing
+ * secret. Every inbound request is verified with `Stripe.webhooks.constructEvent`
+ * against the RAW body BEFORE `handleStripeEvent` is reached; a missing,
+ * malformed or wrong-key signature returns 400 having touched nothing. The
+ * isolating tests in `route.test.ts` assert the whole order row is byte-for-byte
+ * identical across each rejected request, not merely that the status code is 400.
+ *
+ * Fails closed: with STRIPE_WEBHOOK_SECRET missing -- or configured but below
+ * the format/length floor in `@/lib/webhook-secret`, which is a SECONDARY
+ * control against a shipped placeholder and not a substitute for the signature
+ * check -- the endpoint refuses every request (503) without reading or parsing
+ * the body. An unsigned event is never trusted.
+ *
+ * A verified event always returns 200 so Stripe does not retry needlessly.
+ * Event handling is idempotent for the order row (state transitions are guarded
+ * on `status = 'pending'`), so a replayed signed event is a no-op. Note there is
+ * no processed-event ledger keyed on `event.id`: that idempotence is a property
+ * of the SQL guards, not of replay detection.
  *
  * Verification uses the static `Stripe.webhooks` helper: it is a pure HMAC
  * check and needs no API key or network access.
@@ -28,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (!warnedUnconfigured) {
       warnedUnconfigured = true;
       console.error(
-        "[stripe-webhook] STRIPE_WEBHOOK_SECRET is not set; rejecting all webhook events (503). Orders still reconcile on the confirmation page.",
+        `[stripe-webhook] ${WEBHOOK_SECRET_PROBLEM_MESSAGES[readWebhookSecretProblem() ?? "missing"]}; rejecting all webhook events (503). Orders still reconcile on the confirmation page.`,
       );
     }
     return NextResponse.json(
