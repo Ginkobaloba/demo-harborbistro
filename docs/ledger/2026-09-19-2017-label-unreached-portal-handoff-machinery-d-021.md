@@ -22,6 +22,7 @@
   recorded in the PR description. The route, handler, page, and
   `readHarborSession` remain fully implemented and unit-tested but
   unreached from production traffic, same as before this change.
-- **Refs:** D-021 (docs/decisions.md); branch
-  `docs/portal-gate-contract-note`; portal-shell `docs/PORTAL_GATE_CONTRACT.md`;
+- **Refs:** D-021 (docs/decisions.md); PR #41
+  (demo-harborbistro); branch `docs/portal-gate-contract-note`; portal-shell
+  `docs/PORTAL_GATE_CONTRACT.md`;
   `verify/reports/DEEP_VERIFY_2026-09-19_pr37-customer-session-claims.md`
