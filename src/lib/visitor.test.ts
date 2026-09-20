@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   VISITOR_KEY_LABEL,
   isVisitorSigningConfigured,
@@ -143,12 +145,32 @@ describe("verifyVisitorCookie", () => {
   });
 });
 
+/**
+ * The current `.env.example` placeholder, read live from the committed file
+ * rather than asserted from memory. This is the structural rule from
+ * session-secret.ts in test form: every future placeholder must stay under
+ * MIN_SESSION_SECRET_LENGTH so the length floor refuses it on its own,
+ * with no denylist involved.
+ */
+const envExamplePath = fileURLToPath(new URL("../../.env.example", import.meta.url));
+const envExampleSessionSecret = readFileSync(envExamplePath, "utf8").match(
+  /^SESSION_SECRET=(.*)$/m,
+)![1].trim();
+
 describe("no usable SESSION_SECRET (D-018)", () => {
   const unusable: Array<[string, string | undefined]> = [
     ["missing", undefined],
     ["empty", ""],
     ["31 chars", "x".repeat(31)],
-    ["the .env.example placeholder", "replace-with-48-bytes-of-random"],
+    // Retired .env.example placeholder (31 chars). No longer denylisted by
+    // exact string (removed, see session-secret.ts): refused because it is
+    // one character short of MIN_SESSION_SECRET_LENGTH, same as any other
+    // 31-char value.
+    ["the retired .env.example placeholder (31 chars, under the floor)", "replace-with-48-bytes-of-random"],
+    // The CURRENT .env.example placeholder, parsed live from the committed
+    // file. Proves the floor -- not a denylist -- refuses whatever ships
+    // today.
+    [`the current .env.example placeholder (${envExampleSessionSecret.length} chars)`, envExampleSessionSecret],
   ];
 
   for (const [label, secret] of unusable) {
