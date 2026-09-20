@@ -37,10 +37,6 @@ export default function ReservationsPage() {
   const [slotsLoading, setSlotsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  // SCRATCH: proves the Lint CI step can fail (react-hooks/rules-of-hooks).
-  if (submitting) {
-    useState(0);
-  }
 
   useEffect(() => {
     if (!date) return;

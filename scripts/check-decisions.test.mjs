@@ -13,7 +13,10 @@ import { checkDecisions } from "./check-decisions.mjs";
 describe("check-decisions", () => {
   it("passes when every id is unique", () => {
     const text = ["## D-001: first (2026-01-01)", "", "## D-002: second (2026-01-02)", ""].join("\n");
-    expect(checkDecisions(text)).toEqual([]);
+    // SCRATCH: proves the "Unit tests" CI step can fail. This asserts a
+    // wrong result (two problems) for a text that actually has zero.
+    // Reverted in the next commit.
+    expect(checkDecisions(text)).toHaveLength(2);
   });
 
   it("fails when a file has zero decision headings (nothing was checked)", () => {
