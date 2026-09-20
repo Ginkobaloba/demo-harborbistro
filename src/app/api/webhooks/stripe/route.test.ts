@@ -36,6 +36,19 @@ function statusOf(id: string): string {
   return row!.status;
 }
 
+/**
+ * The WHOLE order row, every column. `statusOf` above answers "did the status
+ * change"; this answers "did anything change", which is the property the guard
+ * actually owes us. A 400 that silently wrote `stripe_payment_intent_id` or
+ * bumped `updated_at` would sail past a status-only assertion.
+ */
+function rowOf(id: string): Record<string, unknown> {
+  return db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as Record<
+    string,
+    unknown
+  >;
+}
+
 function eventBody(
   type: "checkout.session.completed" | "checkout.session.expired",
   orderId = ORDER_ID,
@@ -189,4 +202,97 @@ describe("POST /api/webhooks/stripe with STRIPE_WEBHOOK_SECRET set", () => {
     expect(res.status).toBe(200);
     expect(statusOf(ORDER_ID)).toBe("cancelled");
   });
+});
+
+/**
+ * THE PROPERTY. Order state must never change as a result of an event whose
+ * signature was not verified against the configured signing secret.
+ *
+ * The cases above already assert `statusOf(...) === "pending"`, which is a
+ * state assertion, not a status-code-only one. These go further: they snapshot
+ * the ENTIRE row before the request and compare it column-for-column after, so
+ * a rejection that nonetheless wrote `stripe_payment_intent_id`,
+ * `stripe_checkout_session_id` or `updated_at` fails here even though the
+ * status never moved and the response was a correct 400.
+ *
+ * Each forged body is a `checkout.session.completed` with
+ * `payment_status: "paid"` and the order id in metadata, i.e. exactly the event
+ * that WOULD flip the row to `received` if it were allowed through. Neuter the
+ * verification in route.ts and these go red.
+ */
+describe("unverified events leave the order row byte-for-byte unchanged", () => {
+  beforeEach(() => {
+    process.env.STRIPE_WEBHOOK_SECRET = SECRET;
+  });
+
+  it("no stripe-signature header: 400 and the whole row is identical", async () => {
+    const before = rowOf(ORDER_ID);
+    const res = await route.POST(post(eventBody("checkout.session.completed")));
+    expect(res.status).toBe(400);
+    expect(rowOf(ORDER_ID)).toStrictEqual(before);
+  });
+
+  it("malformed stripe-signature header: 400 and the whole row is identical", async () => {
+    const before = rowOf(ORDER_ID);
+    const res = await route.POST(
+      post(eventBody("checkout.session.completed"), {
+        "stripe-signature": "t=1,v1=deadbeef",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(rowOf(ORDER_ID)).toStrictEqual(before);
+  });
+
+  it("signature made with the wrong key: 400 and the whole row is identical", async () => {
+    const before = rowOf(ORDER_ID);
+    const body = eventBody("checkout.session.completed");
+    const res = await route.POST(
+      post(body, signed(body, `whsec_${"z".repeat(40)}`)),
+    );
+    expect(res.status).toBe(400);
+    expect(rowOf(ORDER_ID)).toStrictEqual(before);
+  });
+
+  it("valid signature over a different body: 400 and the whole row is identical", async () => {
+    const before = rowOf(ORDER_ID);
+    const original = eventBody("checkout.session.completed", "HB-OTHER");
+    const tampered = eventBody("checkout.session.completed");
+    const res = await route.POST(post(tampered, signed(original)));
+    expect(res.status).toBe(400);
+    expect(rowOf(ORDER_ID)).toStrictEqual(before);
+  });
+
+  it("control: the same body WITH a correct signature does change the row", async () => {
+    // Without this, the four assertions above would also pass against a route
+    // that ignored the body entirely. This proves the forged event is one that
+    // really would mutate state if it were let through.
+    const before = rowOf(ORDER_ID);
+    const body = eventBody("checkout.session.completed");
+    const res = await route.POST(post(body, signed(body)));
+    expect(res.status).toBe(200);
+    expect(rowOf(ORDER_ID)).not.toStrictEqual(before);
+    expect(statusOf(ORDER_ID)).toBe("received");
+  });
+});
+
+/**
+ * Secondary control at the route boundary: a configured-but-malformed
+ * STRIPE_WEBHOOK_SECRET reads as unconfigured, so the endpoint 503s rather
+ * than using a placeholder as an HMAC key. The request here is signed WITH
+ * that malformed secret, so the signature itself is valid for it: only the
+ * format/length floor can be what rejects this.
+ */
+describe("malformed STRIPE_WEBHOOK_SECRET is treated as unconfigured", () => {
+  for (const bad of ["whsec_xxx", "whsec_short", "x".repeat(48), " whsec_" + "a".repeat(40)]) {
+    it(`503s for a request correctly signed with ${JSON.stringify(bad)}`, async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      process.env.STRIPE_WEBHOOK_SECRET = bad;
+      const before = rowOf(ORDER_ID);
+      const body = eventBody("checkout.session.completed");
+      const res = await route.POST(post(body, signed(body, bad)));
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe("Webhook not configured");
+      expect(rowOf(ORDER_ID)).toStrictEqual(before);
+    });
+  }
 });

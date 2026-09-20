@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { StripeModeError, checkStripeTestMode } from "./stripe-mode";
+import { webhookSecretProblem } from "./webhook-secret";
 
 /**
  * Lazily-constructed Stripe client. Construction is deferred so that
@@ -44,7 +45,19 @@ export function isStripeConfigured(): boolean {
   return checkStripeTestMode(process.env).ok;
 }
 
-/** The webhook signing secret, if configured. */
+/**
+ * The webhook signing secret, if it is configured AND clears the format/length
+ * floor in `./webhook-secret` (`whsec_` prefix, at least
+ * MIN_WEBHOOK_SECRET_LENGTH characters). Anything else reads as unconfigured,
+ * so the webhook route fails closed (503) instead of using it as an HMAC key.
+ *
+ * SECONDARY CONTROL, NOT THE GUARD. The floor catches a shipped placeholder or
+ * a value pasted into the wrong variable. It cannot and does not stop an
+ * attacker-chosen `whsec_`-shaped value that reaches configuration. The guard
+ * is the signature verification in the webhook route; see the module comment
+ * in `./webhook-secret` before relying on this for anything.
+ */
 export function getWebhookSecret(): string | undefined {
-  return process.env.STRIPE_WEBHOOK_SECRET || undefined;
+  const value = process.env.STRIPE_WEBHOOK_SECRET;
+  return webhookSecretProblem(value) ? undefined : value;
 }
