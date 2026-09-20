@@ -23,6 +23,7 @@
     "ledger:check": "node scripts/ledger.mjs check"
   },
   "dependencies": {
+    "ci-break-lockfile-desync": "^999.0.0",
     "@paradigm-codes/auth": "^0.1.0",
     "better-sqlite3": "^12.10.0",
     "jose": "^6.2.3",
