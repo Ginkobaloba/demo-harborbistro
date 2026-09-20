@@ -4,15 +4,28 @@
  * Two things are keyed by it: the portal `hb_session` JWT (portal-session.ts)
  * and, through a derived key, the signed `hb_visitor` cookie (visitor.ts).
  * Both apply the same rule, which is the rule the portal session has always
- * used: set, and at least 32 characters. The published `.env.example`
- * placeholder is refused by name as well, in case it is ever lengthened.
+ * used: set, and at least 32 characters.
+ *
+ * PLACEHOLDER_SECRETS below denylists the RETIRED `.env.example` placeholder
+ * ("replace-with-48-bytes-of-random", 31 chars) by exact string, kept only as
+ * defense in depth for anyone who deployed an older checkout. It is not the
+ * primary guard and must never become one: an exact-string denylist is
+ * trivially defeated by editing a single character of the placeholder, which
+ * is exactly what a person does when told a value is invalid. The current
+ * `.env.example` placeholder is instead kept well under MIN_SESSION_SECRET_LENGTH
+ * so it fails the length rule outright, structurally, no matter how it is
+ * edited short of supplying a real secret. Do not add the current placeholder
+ * to this set -- that would resurrect the anti-pattern this comment warns
+ * about the moment someone "fixes" the set to match a future placeholder.
  *
  * Deliberately free of Node-only imports: the Edge middleware reads it too.
  */
 
 export const MIN_SESSION_SECRET_LENGTH = 32;
 
-/** The .env.example placeholder is public, so it must never sign anything. */
+/** Retired `.env.example` placeholder, denylisted by exact string as defense in
+ * depth only -- see the module comment above. Never add a current placeholder
+ * here; keep new placeholders too short to pass MIN_SESSION_SECRET_LENGTH instead. */
 const PLACEHOLDER_SECRETS = new Set(["replace-with-48-bytes-of-random"]);
 
 export type SessionSecretProblem = "missing" | "too_short" | "placeholder";
