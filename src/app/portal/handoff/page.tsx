@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 
 /**
+ * UNREACHED in production as of 2026-09-19: the portal renders this demo
+ * as an iframe tile, and iframe tiles receive no token today, so nothing
+ * ever navigates a visitor to this page with a #portal_token fragment.
+ * The portal side owns this decision and records it in
+ * `docs/PORTAL_GATE_CONTRACT.md` (portal-shell); check there before
+ * assuming this page is live.
+ *
  * Client-side handoff page (chunk 4b).
  *
  * The Portal redirects logged-in users to:
