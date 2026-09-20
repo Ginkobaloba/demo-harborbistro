@@ -13,11 +13,6 @@ const STORY_IMG =
   "https://images.unsplash.com/photo-1466978913421-dad2ebd01d17?auto=format&fit=crop&w=1400&q=70";
 
 export default function AboutPage() {
-  // SCRATCH: proves the Build CI step can fail independently of
-  // typecheck/lint/unit tests. /about is statically prerendered, has no
-  // vitest coverage, and this throw is type-valid and lint-clean.
-  // Reverted in the next commit.
-  throw new Error("ci-break-build: forced failure during static prerender of /about");
   return (
     <main>
       {/* Intro */}

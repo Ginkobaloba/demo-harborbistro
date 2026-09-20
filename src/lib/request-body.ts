@@ -22,7 +22,12 @@
 export const BODY_LIMITS = {
   /** Cart plus contact details. MAX_CART_LINES configured lines fit easily. */
   checkout: 32 * 1024,
-  reservation: 8 * 1024,
+  // SCRATCH: proves the "Real-server suite (post-build)" CI step can fail
+  // independently of tsc/lint/unit tests/build. body-caps.server.test.ts
+  // hardcodes RESERVATION_CAP = 8 * 1024 and asserts the real running
+  // server enforces exactly that boundary; this diverges it. Reverted in
+  // the next commit.
+  reservation: 4 * 1024,
   /** Operator actions: a single short enum field. */
   adminAction: 1024,
   /** A signed portal JWT; real tokens are well under 2 KB. */
