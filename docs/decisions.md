@@ -580,3 +580,73 @@ tiles receive a token, or the portal moves harborbistro to a top-level
 redirect, these comments and this entry are stale -- check that file
 before assuming this route, page, or `readHarborSession` are still dead
 code.
+
+## D-022: An explicit env flag gates /admin and /api/admin, not a session check (2026-09-25)
+
+The admin surfaces (`/admin`, `/admin/orders`, `/admin/reservations`,
+`POST /api/admin/orders/[id]`, `POST /api/admin/reservations/[id]`) had no
+application-level gate: any request that reached them rendered or acted,
+relying entirely on layers outside this repo -- the nginx containment in
+`cloudflare-config` (`harborbistro.locations` returns 404 for `/admin` and
+`/api/admin`) and the D-016 visitor-scoped SQL, which limits what a
+reachable request could see or change but does not stop the request from
+reaching the app. That containment file is out of scope for this change
+(different repo, removing it is a separate, later step); this entry adds
+the inner layer without touching the outer one.
+
+**Why a flag, not a session check.** Harbor has no admin authentication.
+`readHarborSession` (`src/lib/portal-session.ts`) exists but has zero
+production callers (D-021): the portal renders Harbor as a `shape:
+"iframe"` tile and never navigates a visitor to the handoff route that
+would populate a session, so gating on it would be permanently false. That
+would not add security -- it is already unreachable end to end -- and it
+would misrepresent the surface as protected by a login flow that does not
+exist. An explicit opt-in env var, `HARBOR_ADMIN_ENABLED`, says exactly
+what it is: off by default, on only when an operator deliberately flips it
+(for example, to demo the staff view). See the doc comment on
+`src/lib/admin-gate.ts` (`adminSurfacesEnabled()`) for the same reasoning
+in the code.
+
+**Where it is checked.**
+- The three page components (`src/app/admin/page.tsx`,
+  `admin/orders/page.tsx`, `admin/reservations/page.tsx`) call
+  `notFound()` first, before `readVisitorScope()` or any data read, so a
+  closed gate is a real 404, not a redirect or a blank render.
+- The two route handlers (`src/app/api/admin/orders/[id]/route.ts`,
+  `api/admin/reservations/[id]/route.ts`) return 404 first, before
+  `await props.params`, `scopeFromRequest`, or `readJsonBody` -- so a
+  closed gate causes no parsing, no DB access, and no side effect. The
+  404 body matches the existing scope-404 shape (`{ error: "Order not
+  found" }` / `{ error: "Reservation not found" }`), consistent with the
+  D-016 posture that an out-of-scope id and an unknown id are
+  indistinguishable; a closed gate is now indistinguishable from both.
+- Middleware does **not** gate the API routes. `src/middleware.ts`'s
+  matcher deliberately excludes `/api/` (D-017: middleware on a request
+  with a body makes Next buffer the whole upload before the route's own
+  streaming byte cap runs). Adding `/api/` to the matcher to cover the
+  gate would reintroduce that problem, so each route handler checks for
+  itself instead.
+
+**Read at call time, not cached.** `adminSurfacesEnabled()` reads
+`process.env.HARBOR_ADMIN_ENABLED` on every call, matching
+`readSessionSecret()` and the `PORTAL_VERIFIER` flag elsewhere in this
+codebase, and matching how the tests toggle it mid-run.
+
+**Tests.** `src/app/admin/admin-gate.test.tsx` is new: the predicate
+across several env values including the exact-match requirement (`"1"`
+opens, `"true"`/`"0"`/`""`/unset/`"01"` stay closed); each of the five
+surfaces refused when closed (pages via `notFound()`, routes via a 404
+with a before/after row comparison proving no mutation, including two
+ordering cases -- malformed JSON and an over-cap body -- that prove the
+gate runs before `readJsonBody`); and each surface working normally when
+the flag is `"1"`. `visitor-scope.test.tsx` and
+`test/server/visitor-cookie.server.test.ts` now force the gate open
+(`HARBOR_ADMIN_ENABLED=1`) throughout, since their whole point is D-016
+visitor scoping on those surfaces, not this gate.
+
+**Verification.** Per surface, the gate call was removed by hand, the
+relevant test in `admin-gate.test.tsx` was confirmed to go red (not just
+a different message -- an actually-failing assertion), the file was
+restored with `git checkout --`, and `git status --porcelain` was
+confirmed empty before moving to the next surface. See the PR description
+for the per-surface table.

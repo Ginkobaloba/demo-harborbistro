@@ -57,14 +57,23 @@ To enable it for the deployed demo (Stripe **test mode**):
 Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`
 prints a `whsec_` to use as `STRIPE_WEBHOOK_SECRET`.
 
+## Admin surfaces
+
+`/admin`, `/admin/orders`, `/admin/reservations` and the two
+`/api/admin/*/[id]` actions are gated behind `HARBOR_ADMIN_ENABLED=1`, off
+by default (`src/lib/admin-gate.ts`). With the flag unset, every one of
+those surfaces answers a real 404, before any data is read or any action is
+taken. Set it only when you deliberately want to demo the staff view.
+Details: `docs/decisions.md` D-022.
+
 ## Visitor data (demo scope and retention)
 
-`/admin` is open so anyone can try the staff view, but each browser only
-sees the fictional seed records plus the orders and reservations it created
-itself. A random visitor id in the HttpOnly `hb_visitor` cookie tags every
-record; admin views, admin actions and the confirmation pages filter on it
-server-side, and another visitor's record answers 404. Details:
-`docs/decisions.md` D-016.
+Once the admin surfaces are enabled, each browser only sees the fictional
+seed records plus the orders and reservations it created itself. A random
+visitor id in the HttpOnly `hb_visitor` cookie tags every record; admin
+views, admin actions and the confirmation pages filter on it server-side,
+and another visitor's record answers 404. Details: `docs/decisions.md`
+D-016.
 
 Retention: visitor-created orders and reservations are deleted 24 hours
 after creation. The purge runs when the server starts and then at most once

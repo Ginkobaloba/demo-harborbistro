@@ -18,6 +18,10 @@ process.env.HARBOR_RETENTION_DISABLED = "1";
 // The visitor cookie is signed (D-018).
 const SECRET = "s".repeat(48);
 process.env.SESSION_SECRET = SECRET;
+// This file's whole point is D-016 visitor scoping on the admin surfaces, so
+// the app-level admin gate (D-022) must be open throughout; its own
+// closed/open behavior is covered separately in admin-gate.test.ts.
+process.env.HARBOR_ADMIN_ENABLED = "1";
 
 // Server components read the visitor cookie through next/headers. Outside a
 // Next.js request there is no cookie store, so the test supplies one: set

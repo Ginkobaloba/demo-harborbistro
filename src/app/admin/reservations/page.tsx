@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import {
@@ -12,6 +13,7 @@ import { AutoRefresh } from "@/components/admin/AutoRefresh";
 import { ReservationActions } from "@/components/admin/ReservationActions";
 import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
 import { readVisitorScope } from "@/lib/visitor-server";
+import { adminSurfacesEnabled } from "@/lib/admin-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,9 @@ function StatusChip({ status }: { status: string }) {
 }
 
 export default async function AdminReservationsPage() {
+  // App-level gate (D-022): closed by default, ahead of everything else.
+  if (!adminSurfacesEnabled()) notFound();
+
   // Seed bookings plus this browser's own bookings only (D-016).
   const scope = await readVisitorScope();
   const today = todayLocalDate();

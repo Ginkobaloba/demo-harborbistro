@@ -7,6 +7,7 @@ import {
 import type { ReservationStatus } from "@/lib/types";
 import { BODY_LIMITS, asRecord, readJsonBody } from "@/lib/request-body";
 import { scopeFromRequest } from "@/lib/visitor";
+import { adminSurfacesEnabled } from "@/lib/admin-gate";
 
 export const runtime = "nodejs";
 
@@ -21,8 +22,15 @@ const ALLOWED: ReservationStatus[] = ["seated", "completed", "cancelled"];
  *
  * Demo scope (D-016): acts only on seed bookings plus bookings this browser
  * made. Any other id is 404 with the same body as an unknown id.
+ *
+ * App-level gate (D-022): closed by default. Checked first, before params,
+ * body parsing, or any DB access, so a closed gate never causes a side
+ * effect.
  */
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  if (!adminSurfacesEnabled()) {
+    return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
+  }
   const params = await props.params;
   const scope = await scopeFromRequest(req);
   const read = await readJsonBody(req, BODY_LIMITS.adminAction);
