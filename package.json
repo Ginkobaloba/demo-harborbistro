@@ -20,13 +20,16 @@
     "test:checkout": "tsx scripts/test-checkout.ts",
     "db:purge-visitors": "tsx scripts/purge-visitor-data.ts",
     "verify:visitor-scope": "tsx scripts/verify-visitor-scope.ts",
-    "ledger:check": "node scripts/ledger.mjs check"
+    "ledger:check": "node scripts/ledger.mjs check",
+    "test:rls": "vitest run --config vitest.rls.config.ts"
   },
   "dependencies": {
     "@paradigm-codes/auth": "^0.1.0",
     "better-sqlite3": "^12.10.0",
     "jose": "^6.2.3",
     "next": "15.5.25",
+    "pg": "^8.23.0",
+    "pg-types": "^4.1.0",
     "react": "^18",
     "react-dom": "^18",
     "sharp": "^0.35.0",
@@ -35,6 +38,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^10",
