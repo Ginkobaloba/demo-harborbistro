@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Pool } from "pg";
 import { withTenant, __getPoolForTests, closePool, TenantScopeError } from "@/lib/pg";
+import { refuseIfNotOurDatabase } from "@/lib/scratch-db-guard";
 
 /**
  * Does per-tenant isolation actually hold for Harbor Bistro, and does the
@@ -44,15 +45,12 @@ function appUrlFrom(url: string): string {
   return u.toString();
 }
 
-/** Tables this schema owns. Anything else in public means it is not our database. */
-const OWN_TABLES = new Set(["menu_items", "orders", "reservations"]);
-
 function requireScratchDatabase(): string {
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
       "DATABASE_URL is not set. This test DROPS AND RECREATES schemas, so it " +
-        "refuses to guess. See docs/ops/DEPLOY_POSTGRES.md.",
+        "refuses to guess. Run `npm run db:dev` for a verified one.",
     );
   }
   for (const smell of ["neon.tech", "prod", "portal"]) {
@@ -61,39 +59,6 @@ function requireScratchDatabase(): string {
     }
   }
   return url;
-}
-
-/**
- * Refuse to drop schemas in a database that is not ours.
- *
- * THE NAME CHECK ABOVE IS NOT ENOUGH, and this is not hypothetical. Building
- * this suite, a port binding silently failed and `localhost:55434` turned out
- * to belong to ANOTHER SESSION's scratch database (automation-engine-dev-pg).
- * The connection was refused only because its password differed. Had the
- * credentials matched, beforeAll would have run DROP SCHEMA public CASCADE on
- * someone else's data -- and "another developer's scratch database" passes a
- * check for "prod", "neon" and "portal" perfectly. The guard tested for a
- * SMELL; it needed to test for IDENTITY.
- *
- * So: a database is ours if public holds nothing, or holds only tables we
- * recognise. One unfamiliar table and we stop.
- */
-async function refuseIfNotOurDatabase(pool: Pool): Promise<void> {
-  const { rows } = await pool.query<{ tablename: string; datname: string }>(
-    `SELECT t.tablename, current_database() AS datname
-       FROM pg_tables t WHERE t.schemaname = 'public'`,
-  );
-  const foreign = rows.map((r) => r.tablename).filter((t) => !OWN_TABLES.has(t));
-  if (foreign.length) {
-    const db = rows[0]?.datname ?? "(unknown)";
-    throw new Error(
-      `REFUSING to drop schemas in database "${db}": its public schema holds ` +
-        `tables this suite does not own -- ${foreign.sort().join(", ")}. ` +
-        "That is somebody else's database. Check DATABASE_URL and the port: a " +
-        "failed docker port binding is enough to point you at another " +
-        "session's Postgres, and the URL will look perfectly innocent.",
-    );
-  }
 }
 
 async function insertOrder(
@@ -113,7 +78,7 @@ async function insertOrder(
 beforeAll(async () => {
   adminUrl = requireScratchDatabase();
   admin = new Pool({ connectionString: adminUrl });
-  await refuseIfNotOurDatabase(admin);
+  await refuseIfNotOurDatabase((sql) => admin.query(sql));
   await admin.query(fs.readFileSync(path.join(process.cwd(), "db", "reset-schemas.sql"), "utf8"));
   await admin.query(fs.readFileSync(path.join(process.cwd(), "db", "schema.sql"), "utf8"));
   await admin.query("ALTER ROLE harbor_app PASSWORD 'harbor_app'");

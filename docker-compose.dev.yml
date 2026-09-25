@@ -1,0 +1,41 @@
+# Scratch Postgres for the Harbor Bistro data layer and `npm run test:rls`.
+# Development only; the credentials are deliberately worthless.
+#
+# PORT 55440. Do not assume a port is free -- several Claude sessions run
+# scratch databases on this machine at once, and a binding that collides FAILS
+# SILENTLY: the container comes up publishing nothing and every TCP connection
+# goes to whoever already owns the port. That happened here: 55434 belonged to
+# another session's database, and the suite was refused only because the
+# password differed. Before changing this port, check:
+#
+#   docker ps -a --format '{{.Names}}\t{{.Ports}}'
+#
+# and never stop a container you did not start. `npm run db:dev` reads the
+# published port back and refuses if the binding did not take.
+#
+# /var/lib/postgresql, NOT /var/lib/postgresql/data: Postgres 18 stores data in
+# a versioned subdirectory and REFUSES TO START against the old mount point,
+# exiting 1 while the container sits "unhealthy" -- which looks like a slow
+# start rather than a failure.
+
+services:
+  harbor-dev-db:
+    image: postgres:18-alpine
+    container_name: harbor-dev-db
+    environment:
+      POSTGRES_USER: harbor
+      POSTGRES_PASSWORD: harbor
+      POSTGRES_DB: harbor
+    ports:
+      - "127.0.0.1:55440:5432"
+    volumes:
+      - harbor-dev-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harbor -d harbor"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  harbor-dev-pgdata:
+    name: harbor-dev-pgdata
