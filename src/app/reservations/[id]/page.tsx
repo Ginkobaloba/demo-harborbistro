@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { getReservation, formatTime, formatDate } from "@/lib/reservations";
 import { RESTAURANT } from "@/lib/restaurant";
 import { readVisitorScope } from "@/lib/visitor-server";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,10 @@ type Props = { params: Promise<{ id: string }> };
 export default async function ConfirmationPage(props: Props) {
   const params = await props.params;
   // Only a seed booking or one this browser made resolves (D-016).
-  const reservation = getReservation(params.id, await readVisitorScope());
+  const scope = await readVisitorScope();
+  const reservation = await withCurrentTenant((db) =>
+    getReservation(db, params.id, scope),
+  );
   if (!reservation) notFound();
 
   return (

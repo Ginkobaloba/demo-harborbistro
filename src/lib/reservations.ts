@@ -1,7 +1,7 @@
-import { getDb } from "./db";
 import { newReservationId } from "./ids";
 import type { Reservation } from "./types";
 import { SEED_ONLY, scopeSql, type VisitorScope } from "./visitor";
+import type { TenantDb } from "./pg";
 
 /**
  * All possible time slots per day-of-week (0=Sun, 1=Mon closed, 2=Tue...6=Sat).
@@ -33,17 +33,22 @@ export function slotsForDate(dateStr: string): string[] {
  * Deliberately unscoped: it returns only per-slot availability (no names, no
  * contact details), and capacity is shared by every guest.
  */
-export function getAvailableSlots(dateStr: string): string[] {
+export async function getAvailableSlots(
+  db: TenantDb,
+  dateStr: string,
+): Promise<string[]> {
   const all = slotsForDate(dateStr);
   if (all.length === 0) return [];
-  const db = getDb();
-  const booked = db
-    .prepare(
-      `SELECT reserved_time, COUNT(*) c FROM reservations
-       WHERE reserved_date = ? AND status != 'cancelled'
-       GROUP BY reserved_time`
-    )
-    .all(dateStr) as { reserved_time: string; c: number }[];
+  // Availability is deliberately NOT visitor-scoped: a slot another visitor
+  // booked is unavailable to everyone, and hiding that would let two diners
+  // book the same table. It leaks that *someone* booked 19:00, which is
+  // inherent to showing availability at all.
+  const booked = await db.query<{ reserved_time: string; c: number }>(
+    `SELECT reserved_time, COUNT(*)::int c FROM reservations
+      WHERE tenant_id = $1 AND reserved_date = $2 AND status <> 'cancelled'
+      GROUP BY reserved_time`,
+    [db.tenantId, dateStr],
+  );
   const full = new Set(
     booked.filter((r) => r.c >= SLOT_CAPACITY).map((r) => r.reserved_time)
   );
@@ -65,36 +70,40 @@ function rowToReservation(row: Record<string, unknown>): Reservation {
   };
 }
 
-export function createReservation(data: {
-  name: string;
-  phone: string;
-  email?: string | null;
-  partySize: number;
-  date: string;
-  time: string;
-  notes?: string | null;
-  /** The creating browser's visitor id (D-016). Required: no untagged rows. */
-  visitorId: string;
-}): Reservation {
-  const db = getDb();
+export async function createReservation(
+  db: TenantDb,
+  data: {
+    name: string;
+    phone: string;
+    email?: string | null;
+    partySize: number;
+    date: string;
+    time: string;
+    notes?: string | null;
+    /** The creating browser's visitor id (D-016). Required: no untagged rows. */
+    visitorId: string;
+  },
+): Promise<Reservation> {
   const id = newReservationId();
-  db.prepare(
+  await db.query(
     `INSERT INTO reservations
-       (id, name, phone, email, party_size, reserved_date, reserved_time, notes, status,
-        visitor_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`
-  ).run(
-    id,
-    data.name,
-    data.phone,
-    data.email ?? null,
-    data.partySize,
-    data.date,
-    data.time,
-    data.notes ?? null,
-    data.visitorId
+       (tenant_id, id, name, phone, email, party_size, reserved_date, reserved_time,
+        notes, status, visitor_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'confirmed', $10)`,
+    [
+      db.tenantId,
+      id,
+      data.name,
+      data.phone,
+      data.email ?? null,
+      data.partySize,
+      data.date,
+      data.time,
+      data.notes ?? null,
+      data.visitorId,
+    ],
   );
-  return getReservation(id, { visitorId: data.visitorId })!;
+  return (await getReservation(db, id, { visitorId: data.visitorId }))!;
 }
 
 /**
@@ -102,42 +111,48 @@ export function createReservation(data: {
  * made by the caller's own browser (D-016). Returns null for an unknown id
  * and for another visitor's booking alike.
  */
-export function getReservation(
+export async function getReservation(
+  db: TenantDb,
   id: string,
   scope: VisitorScope = SEED_ONLY,
-): Reservation | null {
-  const { sql, params } = scopeSql(scope);
-  const row = getDb()
-    .prepare(`SELECT * FROM reservations WHERE id = ? AND ${sql}`)
-    .get(id, ...params) as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return rowToReservation(row);
+): Promise<Reservation | null> {
+  const params: unknown[] = [db.tenantId, id];
+  const visitor = scopeSql(scope, params);
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM reservations WHERE tenant_id = $1 AND id = $2 AND ${visitor}`,
+    params,
+  );
+  return rows[0] ? rowToReservation(rows[0]) : null;
 }
 
 /** The full book, scoped to seed bookings plus the caller's own. */
-export function getAllReservations(scope: VisitorScope = SEED_ONLY): Reservation[] {
-  const { sql, params } = scopeSql(scope);
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM reservations WHERE ${sql}
-       ORDER BY reserved_date, reserved_time, created_at`
-    )
-    .all(...params) as Record<string, unknown>[];
+export async function getAllReservations(
+  db: TenantDb,
+  scope: VisitorScope = SEED_ONLY,
+): Promise<Reservation[]> {
+  const params: unknown[] = [db.tenantId];
+  const visitor = scopeSql(scope, params);
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM reservations WHERE tenant_id = $1 AND ${visitor}
+      ORDER BY reserved_date, reserved_time, created_at`,
+    params,
+  );
   return rows.map(rowToReservation);
 }
 
 /** Bookings on a date (local), in service order. Scoped like getAllReservations. */
-export function getReservationsForDate(
+export async function getReservationsForDate(
+  db: TenantDb,
   dateStr: string,
   scope: VisitorScope = SEED_ONLY,
-): Reservation[] {
-  const { sql, params } = scopeSql(scope);
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM reservations WHERE reserved_date = ? AND ${sql}
-       ORDER BY reserved_time, created_at`
-    )
-    .all(dateStr, ...params) as Record<string, unknown>[];
+): Promise<Reservation[]> {
+  const params: unknown[] = [db.tenantId, dateStr];
+  const visitor = scopeSql(scope, params);
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM reservations WHERE tenant_id = $1 AND reserved_date = $2 AND ${visitor}
+      ORDER BY reserved_time, created_at`,
+    params,
+  );
   return rows.map(rowToReservation);
 }
 
@@ -188,12 +203,13 @@ export function canTransitionReservation(
  * ReservationNotFoundError for an unknown or out-of-scope id and
  * ReservationTransitionError for an illegal transition.
  */
-export function setReservationStatus(
+export async function setReservationStatus(
+  db: TenantDb,
   id: string,
   to: Reservation["status"],
   scope: VisitorScope = SEED_ONLY,
-): Reservation {
-  const current = getReservation(id, scope);
+): Promise<Reservation> {
+  const current = await getReservation(db, id, scope);
   if (!current) {
     throw new ReservationNotFoundError(id);
   }
@@ -203,10 +219,11 @@ export function setReservationStatus(
       `Reservation ${id} cannot move from "${current.status}" to "${to}"`,
     );
   }
-  getDb()
-    .prepare("UPDATE reservations SET status = ? WHERE id = ?")
-    .run(to, id);
-  return getReservation(id, scope)!;
+  await db.query(
+    "UPDATE reservations SET status = $1 WHERE tenant_id = $2 AND id = $3",
+    [to, db.tenantId, id],
+  );
+  return (await getReservation(db, id, scope))!;
 }
 
 /** Today as a local YYYY-MM-DD string (matches how reserved_date is stored). */

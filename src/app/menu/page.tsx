@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getMenuByCourse } from "@/lib/menu";
 import { MenuBrowser } from "@/components/menu/MenuBrowser";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const metadata: Metadata = {
   title: "Menu",
@@ -8,8 +9,11 @@ export const metadata: Metadata = {
     "Harbor Bistro's full menu: snacks, salads, entrees, sides, desserts, drinks, and cocktails. Coastal-American cooking with vegetarian, vegan, and gluten-free options throughout.",
 };
 
-export default function MenuPage() {
-  const items = Array.from(getMenuByCourse().values()).flat();
+export default async function MenuPage() {
+  // The await must wrap the CALL, not the whole chain: `await f().values()`
+  // parses as `await (f().values())`, which is .values() on a Promise.
+  const byCourse = await withCurrentTenant((db) => getMenuByCourse(db));
+  const items = Array.from(byCourse.values()).flat();
 
   return (
     <main className="mx-auto max-w-site px-6 pb-16">

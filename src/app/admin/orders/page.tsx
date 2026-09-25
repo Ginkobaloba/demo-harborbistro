@@ -15,6 +15,7 @@ import { OrderActions } from "@/components/admin/OrderActions";
 import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
 import { readVisitorScope } from "@/lib/visitor-server";
 import { adminSurfacesEnabled } from "@/lib/admin-gate";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +44,15 @@ function ago(iso: string): string {
   return `${hrs} hr ago`;
 }
 
-function OrderCard({ order }: { order: Order }) {
+function OrderCard({
+  order,
+  descriptions,
+}: {
+  order: Order;
+  /** Option labels resolved once, server-side, in the page's transaction.
+   *  A render callback cannot await, so this must arrive already resolved. */
+  descriptions: Map<string, string>;
+}) {
   return (
     <li className="rounded-xl border border-harbor-line bg-white p-4 shadow-warm">
       <div className="flex items-baseline justify-between gap-2">
@@ -63,7 +72,7 @@ function OrderCard({ order }: { order: Order }) {
 
       <ul className="mt-3 space-y-1.5 border-t border-harbor-line pt-3 text-sm">
         {order.items.map((line, i) => {
-          const detail = lineDescription(line);
+          const detail = descriptions.get(line.slug) ?? "";
           return (
             <li key={i}>
               <span className="font-medium">
@@ -95,9 +104,30 @@ export default async function AdminOrdersPage() {
 
   // Seed orders plus this browser's own orders only (D-016).
   const scope = await readVisitorScope();
-  const active = getActiveOrders(scope);
-  const recent = getRecentOrders(scope, 20);
-  const counts = getKitchenCounts(scope);
+  // One transaction for all three reads, so the queue, the history and the
+  // header counts come from a single consistent snapshot.
+  const { active, recent, counts, descriptions } = await withCurrentTenant(
+    async (db) => {
+      const active = await getActiveOrders(db, scope);
+      const recent = await getRecentOrders(db, scope, 20);
+      // lineDescription cannot be awaited inside the JSX map below, so the
+      // labels are resolved here, once, in the same transaction.
+      const descriptions = new Map<string, string>();
+      for (const order of [...active, ...recent]) {
+        for (const line of order.items) {
+          if (!descriptions.has(line.slug)) {
+            descriptions.set(line.slug, await lineDescription(db, line));
+          }
+        }
+      }
+      return {
+        active,
+        recent,
+        counts: await getKitchenCounts(db, scope),
+        descriptions,
+      };
+    },
+  );
 
   const byStatus = new Map<OrderStatus, Order[]>();
   for (const s of ACTIVE_ORDER_STATUSES) byStatus.set(s, []);
@@ -148,7 +178,7 @@ export default async function AdminOrdersPage() {
               ) : (
                 <ul className="mt-3 space-y-3">
                   {list.map((order) => (
-                    <OrderCard key={order.id} order={order} />
+                    <OrderCard key={order.id} order={order} descriptions={descriptions} />
                   ))}
                 </ul>
               )}

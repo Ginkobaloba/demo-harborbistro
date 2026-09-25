@@ -14,6 +14,7 @@ import { ReservationActions } from "@/components/admin/ReservationActions";
 import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
 import { readVisitorScope } from "@/lib/visitor-server";
 import { adminSurfacesEnabled } from "@/lib/admin-gate";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -45,8 +46,10 @@ export default async function AdminReservationsPage() {
   // Seed bookings plus this browser's own bookings only (D-016).
   const scope = await readVisitorScope();
   const today = todayLocalDate();
-  const todays = getReservationsForDate(today, scope);
-  const all = getAllReservations(scope);
+  const { todays, all } = await withCurrentTenant(async (db) => ({
+    todays: await getReservationsForDate(db, today, scope),
+    all: await getAllReservations(db, scope),
+  }));
   const covers = todays
     .filter((r) => r.status !== "cancelled")
     .reduce((n, r) => n + r.partySize, 0);

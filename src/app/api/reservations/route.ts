@@ -17,6 +17,7 @@ import {
   visitorCookieAttributes,
   visitorIdForWrite,
 } from "@/lib/visitor";
+import { withCurrentTenant } from "@/lib/tenant";
 
 /** GET /api/reservations?date=YYYY-MM-DD -> { slots: string[], isClosed: boolean } */
 export async function GET(req: NextRequest) {
@@ -28,7 +29,9 @@ export async function GET(req: NextRequest) {
     );
   }
   const isClosed = slotsForDate(date).length === 0;
-  const slots = isClosed ? [] : getAvailableSlots(date);
+  const slots = isClosed
+    ? []
+    : await withCurrentTenant((db) => getAvailableSlots(db, date));
   return NextResponse.json({ slots, isClosed });
 }
 
@@ -88,13 +91,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const available = getAvailableSlots(String(date));
-  if (!available.includes(String(time))) {
-    return NextResponse.json(
-      { error: "That time slot is no longer available" },
-      { status: 409 }
-    );
-  }
+  // Availability and the insert now share ONE transaction, below. Checking
+  // here and creating later left a gap in which another diner could take the
+  // slot -- two statements against a database that, unlike SQLite, runs them
+  // concurrently.
 
   // Tag the booking with this browser's visitor id so no other visitor can
   // see it in the admin views or on its confirmation page (D-016). An
@@ -105,18 +105,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: VISITOR_SIGNING_UNAVAILABLE }, { status: 503 });
   }
 
-  const reservation = createReservation({
-    name,
-    phone,
-    email: email || null,
-    partySize: Number(partySize),
-    date: String(date),
-    time: String(time),
-    notes: notes || null,
-    visitorId: visitor.visitorId,
+  // Re-check availability and insert inside ONE transaction. The body is
+  // already parsed, so nothing here waits on the network.
+  const outcome = await withCurrentTenant(async (db) => {
+    const available = await getAvailableSlots(db, String(date));
+    if (!available.includes(String(time))) return null;
+    return createReservation(db, {
+      name,
+      phone,
+      email: email || null,
+      partySize: Number(partySize),
+      date: String(date),
+      time: String(time),
+      notes: notes || null,
+      visitorId: visitor.visitorId,
+    });
   });
 
-  const res = NextResponse.json({ id: reservation.id }, { status: 201 });
+  if (!outcome) {
+    return NextResponse.json(
+      { error: "That time slot is no longer available" },
+      { status: 409 }
+    );
+  }
+
+  const res = NextResponse.json({ id: outcome.id }, { status: 201 });
   if (visitor.cookieValue) {
     res.cookies.set({ ...visitorCookieAttributes(), value: visitor.cookieValue });
   }

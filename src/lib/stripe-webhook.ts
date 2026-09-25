@@ -1,12 +1,13 @@
 import type Stripe from "stripe";
 import { markOrderCancelled, markOrderPaid } from "./orders";
+import { withCurrentTenant } from "@/lib/tenant";
 
 /**
  * Apply a Stripe event to local order state. Kept in a lib module (not the
  * route file) so it can be imported by tests and so the route file exports
  * only the HTTP handlers Next.js allows. All handlers are idempotent.
  */
-export function handleStripeEvent(event: Stripe.Event): { handled: boolean } {
+export async function handleStripeEvent(event: Stripe.Event): Promise<{ handled: boolean }> {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -17,7 +18,7 @@ export function handleStripeEvent(event: Stripe.Event): { handled: boolean } {
           ? session.payment_intent
           : (session.payment_intent?.id ?? null);
       if (orderId && session.payment_status === "paid") {
-        markOrderPaid(orderId, paymentIntentId);
+        await withCurrentTenant((db) => markOrderPaid(db, orderId, paymentIntentId));
         return { handled: true };
       }
       return { handled: false };
@@ -27,7 +28,7 @@ export function handleStripeEvent(event: Stripe.Event): { handled: boolean } {
       const orderId =
         session.metadata?.order_id ?? session.client_reference_id ?? null;
       if (orderId) {
-        markOrderCancelled(orderId);
+        await withCurrentTenant((db) => markOrderCancelled(db, orderId));
         return { handled: true };
       }
       return { handled: false };

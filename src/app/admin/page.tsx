@@ -9,6 +9,7 @@ import {
 import { readVisitorScope } from "@/lib/visitor-server";
 import { adminSurfacesEnabled } from "@/lib/admin-gate";
 import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,11 @@ export default async function AdminHomePage() {
 
   // Seed records plus this browser's own orders and bookings only (D-016).
   const scope = await readVisitorScope();
-  const counts = getKitchenCounts(scope);
+  const counts = await withCurrentTenant((db) => getKitchenCounts(db, scope));
   const activeOrders = counts.received + counts.preparing + counts.ready;
-  const todays = getReservationsForDate(todayLocalDate(), scope);
+  const todays = await withCurrentTenant((db) =>
+    getReservationsForDate(db, todayLocalDate(), scope),
+  );
   const upcomingToday = todays.filter(
     (r) => r.status === "confirmed" || r.status === "seated",
   ).length;

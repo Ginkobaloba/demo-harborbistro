@@ -1,7 +1,7 @@
-import { getDb } from "./db";
 import { getItemBySlug } from "./menu";
 import { newOrderId } from "./ids";
 import { SEED_ONLY, scopeSql, type VisitorScope } from "./visitor";
+import type { TenantDb } from "./pg";
 import type {
   Fulfillment,
   MenuItem,
@@ -112,7 +112,10 @@ function normalizeSelections(
  * cart, unknown items, bad quantities, or invalid selections. Returns clean
  * line items with server-authoritative prices and the subtotal.
  */
-export function priceCart(rawLines: unknown): PricedCart {
+export async function priceCart(
+  db: TenantDb,
+  rawLines: unknown,
+): Promise<PricedCart> {
   if (!Array.isArray(rawLines) || rawLines.length === 0) {
     throw new CartError("Your cart is empty");
   }
@@ -128,7 +131,7 @@ export function priceCart(rawLines: unknown): PricedCart {
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_LINE_QUANTITY) {
       throw new CartError(`Quantity for ${slug} must be 1 to ${MAX_LINE_QUANTITY}`);
     }
-    const item = getItemBySlug(slug);
+    const item = await getItemBySlug(db, slug);
     if (!item) throw new CartError(`That item is no longer available: ${slug}`);
 
     const selections = normalizeSelections(item, raw.selections);
@@ -153,8 +156,11 @@ export function priceCart(rawLines: unknown): PricedCart {
  * "Medium rare, Add bacon". Re-derives labels from the menu so it never
  * depends on client-supplied text. Empty string when there are no options.
  */
-export function lineDescription(line: OrderLineItem): string {
-  const item = getItemBySlug(line.slug);
+export async function lineDescription(
+  db: TenantDb,
+  line: OrderLineItem,
+): Promise<string> {
+  const item = await getItemBySlug(db, line.slug);
   if (!item) return "";
   const labels: string[] = [];
   for (const group of item.customizationOptions) {
@@ -230,36 +236,38 @@ export type CreateOrderInput = {
  * customer-facing confirmation and the kitchen only treat an order as real
  * once Stripe confirms payment (status moves to `received`).
  */
-export function createPendingOrder(input: CreateOrderInput): Order {
+export async function createPendingOrder(
+  db: TenantDb,
+  input: CreateOrderInput,
+): Promise<Order> {
   const id = input.id ?? newOrderId();
   const totalCents = input.subtotalCents + input.tipCents;
-  getDb()
-    .prepare(
-      `INSERT INTO orders (
-         id, customer_name, customer_phone, customer_email, fulfillment,
-         delivery_address, items, subtotal_cents, tip_cents, total_cents, status,
-         stripe_checkout_session_id, visitor_id
-       ) VALUES (
-         @id, @customerName, @customerPhone, @customerEmail, @fulfillment,
-         @deliveryAddress, @items, @subtotalCents, @tipCents, @totalCents, 'pending',
-         @stripeCheckoutSessionId, @visitorId
-       )`,
-    )
-    .run({
+  // POSITIONAL, not named. better-sqlite3 took @name parameters; Postgres has
+  // only $n, so the binding ORDER is now load-bearing and a reordered column
+  // list silently writes values into the wrong columns.
+  await db.query(
+    `INSERT INTO orders (
+       tenant_id, id, customer_name, customer_phone, customer_email, fulfillment,
+       delivery_address, items, subtotal_cents, tip_cents, total_cents, status,
+       stripe_checkout_session_id, visitor_id
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13)`,
+    [
+      db.tenantId,
       id,
-      customerName: input.customerName,
-      customerPhone: input.customerPhone,
-      customerEmail: input.customerEmail ?? null,
-      fulfillment: input.fulfillment,
-      deliveryAddress: input.deliveryAddress ?? null,
-      items: JSON.stringify(input.lines),
-      subtotalCents: input.subtotalCents,
-      tipCents: input.tipCents,
+      input.customerName,
+      input.customerPhone,
+      input.customerEmail ?? null,
+      input.fulfillment,
+      input.deliveryAddress ?? null,
+      JSON.stringify(input.lines),
+      input.subtotalCents,
+      input.tipCents,
       totalCents,
-      stripeCheckoutSessionId: input.stripeCheckoutSessionId ?? null,
-      visitorId: input.visitorId,
-    });
-  return getOrderUnscoped(id)!;
+      input.stripeCheckoutSessionId ?? null,
+      input.visitorId,
+    ],
+  );
+  return (await getOrderUnscoped(db, id))!;
 }
 
 /**
@@ -268,11 +276,14 @@ export function createPendingOrder(input: CreateOrderInput): Order {
  * afterwards (D-017), so it checks for a collision up front rather than
  * letting the later insert fail on the primary key.
  */
-export function unusedOrderId(): string {
-  const exists = getDb().prepare("SELECT 1 FROM orders WHERE id = ?");
+export async function unusedOrderId(db: TenantDb): Promise<string> {
   for (let attempt = 0; attempt < 10; attempt++) {
     const id = newOrderId();
-    if (!exists.get(id)) return id;
+    const hit = await db.query(
+      "SELECT 1 FROM orders WHERE tenant_id = $1 AND id = $2",
+      [db.tenantId, id],
+    );
+    if (hit.length === 0) return id;
   }
   throw new Error("Could not mint an unused order id");
 }
@@ -283,11 +294,16 @@ export function unusedOrderId(): string {
  * ids Stripe hands back and carry no browser cookie. Never feed the result
  * to a page or API response that a visitor can reach.
  */
-function getOrderUnscoped(id: string): Order | null {
-  const row = getDb()
-    .prepare("SELECT * FROM orders WHERE id = ?")
-    .get(id) as OrderRow | undefined;
-  return row ? rowToOrder(row) : null;
+async function getOrderUnscoped(db: TenantDb, id: string): Promise<Order | null> {
+  // "Unscoped" means unscoped BY VISITOR. It is still scoped by TENANT, both
+  // by RLS and by the predicate below. Those are different dimensions, and
+  // dropping the tenant here would reach across customers rather than across
+  // browsers.
+  const rows = await db.query<OrderRow>(
+    "SELECT * FROM orders WHERE tenant_id = $1 AND id = $2",
+    [db.tenantId, id],
+  );
+  return rows[0] ? rowToOrder(rows[0]) : null;
 }
 
 /**
@@ -295,27 +311,33 @@ function getOrderUnscoped(id: string): Order | null {
  * by the caller's own browser (D-016). Returns null for an unknown id and for
  * another visitor's order alike, so callers cannot tell the two apart.
  */
-export function getOrder(id: string, scope: VisitorScope = SEED_ONLY): Order | null {
-  const { sql, params } = scopeSql(scope);
-  const row = getDb()
-    .prepare(`SELECT * FROM orders WHERE id = ? AND ${sql}`)
-    .get(id, ...params) as OrderRow | undefined;
-  return row ? rowToOrder(row) : null;
+export async function getOrder(
+  db: TenantDb,
+  id: string,
+  scope: VisitorScope = SEED_ONLY,
+): Promise<Order | null> {
+  const params: unknown[] = [db.tenantId, id];
+  const visitor = scopeSql(scope, params);
+  const rows = await db.query<OrderRow>(
+    `SELECT * FROM orders WHERE tenant_id = $1 AND id = $2 AND ${visitor}`,
+    params,
+  );
+  return rows[0] ? rowToOrder(rows[0]) : null;
 }
 
-export function getOrderByCheckoutSession(sessionId: string): Order | null {
-  const row = getDb()
-    .prepare("SELECT * FROM orders WHERE stripe_checkout_session_id = ?")
-    .get(sessionId) as OrderRow | undefined;
-  return row ? rowToOrder(row) : null;
-}
-
-export function attachCheckoutSession(orderId: string, sessionId: string): void {
-  getDb()
-    .prepare(
-      "UPDATE orders SET stripe_checkout_session_id = ?, updated_at = datetime('now') WHERE id = ?",
-    )
-    .run(sessionId, orderId);
+export async function attachCheckoutSession(
+  db: TenantDb,
+  orderId: string,
+  sessionId: string,
+): Promise<void> {
+  // The same expression as the column DEFAULT, deliberately: an UPDATED row
+  // must carry the same timestamp FORMAT as a CREATED one, or two shapes
+  // diverge inside a single column (trap 8).
+  await db.query(
+    `UPDATE orders SET stripe_checkout_session_id = $1, updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+      WHERE tenant_id = $2 AND id = $3`,
+    [sessionId, db.tenantId, orderId],
+  );
 }
 
 /**
@@ -324,34 +346,39 @@ export function attachCheckoutSession(orderId: string, sessionId: string): void 
  * and the webhook can both call it safely. Returns the resulting order, or null
  * if the id is unknown.
  */
-export function markOrderPaid(
+export async function markOrderPaid(
+  db: TenantDb,
   orderId: string,
   paymentIntentId: string | null,
-): Order | null {
-  const order = getOrderUnscoped(orderId);
+): Promise<Order | null> {
+  const order = await getOrderUnscoped(db, orderId);
   if (!order) return null;
   if (order.status === "pending") {
-    getDb()
-      .prepare(
-        `UPDATE orders
-           SET status = 'received',
-               stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id),
-               updated_at = datetime('now')
-         WHERE id = ? AND status = 'pending'`,
-      )
-      .run(paymentIntentId, orderId);
+    // The `AND status = 'pending'` guard is what makes this idempotent, so the
+    // success page and the webhook can both call it. Keep it.
+    await db.query(
+      `UPDATE orders
+          SET status = 'received',
+              stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
+              updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+        WHERE tenant_id = $2 AND id = $3 AND status = 'pending'`,
+      [paymentIntentId, db.tenantId, orderId],
+    );
   }
-  return getOrderUnscoped(orderId);
+  return getOrderUnscoped(db, orderId);
 }
 
 /** Mark a still-pending order cancelled (expired or abandoned checkout). */
-export function markOrderCancelled(orderId: string): Order | null {
-  getDb()
-    .prepare(
-      "UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
-    )
-    .run(orderId);
-  return getOrderUnscoped(orderId);
+export async function markOrderCancelled(
+  db: TenantDb,
+  orderId: string,
+): Promise<Order | null> {
+  await db.query(
+    `UPDATE orders SET status = 'cancelled', updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+      WHERE tenant_id = $1 AND id = $2 AND status = 'pending'`,
+    [db.tenantId, orderId],
+  );
+  return getOrderUnscoped(db, orderId);
 }
 
 // ----------------------------------------------------------- kitchen / operator
@@ -414,11 +441,12 @@ export class OrderNotFoundError extends OrderTransitionError {
  * unpaid, or already terminal. The status guard in the WHERE clause makes the
  * write idempotent under concurrent operator clicks.
  */
-export function advanceOrder(
+export async function advanceOrder(
+  db: TenantDb,
   orderId: string,
   scope: VisitorScope = SEED_ONLY,
-): Order {
-  const order = getOrder(orderId, scope);
+): Promise<Order> {
+  const order = await getOrder(db, orderId, scope);
   if (!order) throw new OrderNotFoundError(orderId);
   const next = nextOrderStatus(order.status);
   if (!next) {
@@ -426,13 +454,16 @@ export function advanceOrder(
       `Order ${orderId} cannot advance from "${order.status}"`,
     );
   }
-  getDb()
-    .prepare(
-      `UPDATE orders SET status = ?, updated_at = datetime('now')
-       WHERE id = ? AND status = ?`,
-    )
-    .run(next, orderId, order.status);
-  return getOrderUnscoped(orderId)!;
+  // The `AND status = $4` guard is what makes this idempotent under concurrent
+  // operator clicks: the second click matches no row instead of skipping a
+  // state. Postgres runs those clicks concurrently where SQLite serialised
+  // them, so the guard matters more here, not less.
+  await db.query(
+    `UPDATE orders SET status = $1, updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+      WHERE tenant_id = $2 AND id = $3 AND status = $4`,
+    [next, db.tenantId, orderId, order.status],
+  );
+  return (await getOrderUnscoped(db, orderId))!;
 }
 
 /**
@@ -440,70 +471,79 @@ export function advanceOrder(
  * markOrderCancelled (which only touches still-`pending` checkouts): this is
  * the operator cancelling an in-progress kitchen order.
  */
-export function cancelActiveOrder(
+export async function cancelActiveOrder(
+  db: TenantDb,
   orderId: string,
   scope: VisitorScope = SEED_ONLY,
-): Order {
-  const order = getOrder(orderId, scope);
+): Promise<Order> {
+  const order = await getOrder(db, orderId, scope);
   if (!order) throw new OrderNotFoundError(orderId);
   if (!ACTIVE_ORDER_STATUSES.includes(order.status as ActiveOrderStatus)) {
     throw new OrderTransitionError(
       `Order ${orderId} cannot be cancelled from "${order.status}"`,
     );
   }
-  getDb()
-    .prepare(
-      "UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?",
-    )
-    .run(orderId);
-  return getOrderUnscoped(orderId)!;
+  await db.query(
+    `UPDATE orders SET status = 'cancelled', updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+      WHERE tenant_id = $1 AND id = $2`,
+    [db.tenantId, orderId],
+  );
+  return (await getOrderUnscoped(db, orderId))!;
 }
 
 /**
  * Live kitchen queue, oldest first (the order a cook should start next).
  * Scoped to seed orders plus the caller's own (D-016).
  */
-export function getActiveOrders(scope: VisitorScope = SEED_ONLY): Order[] {
-  const { sql, params } = scopeSql(scope);
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM orders
-       WHERE status IN ('received','preparing','ready') AND ${sql}
-       ORDER BY created_at ASC`,
-    )
-    .all(...params) as OrderRow[];
+export async function getActiveOrders(
+  db: TenantDb,
+  scope: VisitorScope = SEED_ONLY,
+): Promise<Order[]> {
+  const params: unknown[] = [db.tenantId];
+  const visitor = scopeSql(scope, params);
+  const rows = await db.query<OrderRow>(
+    `SELECT * FROM orders
+      WHERE tenant_id = $1 AND status IN ('received','preparing','ready') AND ${visitor}
+      ORDER BY created_at ASC`,
+    params,
+  );
   return rows.map(rowToOrder);
 }
 
 /** Recently finished orders (completed or cancelled), newest first. Scoped. */
-export function getRecentOrders(
+export async function getRecentOrders(
+  db: TenantDb,
   scope: VisitorScope = SEED_ONLY,
   limit = 25,
-): Order[] {
-  const { sql, params } = scopeSql(scope);
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM orders
-       WHERE status IN ('completed','cancelled') AND ${sql}
-       ORDER BY updated_at DESC
-       LIMIT ?`,
-    )
-    .all(...params, limit) as OrderRow[];
+): Promise<Order[]> {
+  const params: unknown[] = [db.tenantId];
+  const visitor = scopeSql(scope, params);
+  params.push(limit);
+  const rows = await db.query<OrderRow>(
+    `SELECT * FROM orders
+      WHERE tenant_id = $1 AND status IN ('completed','cancelled') AND ${visitor}
+      ORDER BY updated_at DESC
+      LIMIT $${params.length}`,
+    params,
+  );
   return rows.map(rowToOrder);
 }
 
 /** Counts per active status for the operator header, e.g. {received: 3, ...}. Scoped. */
-export function getKitchenCounts(
+export async function getKitchenCounts(
+  db: TenantDb,
   scope: VisitorScope = SEED_ONLY,
-): Record<ActiveOrderStatus, number> {
-  const { sql, params } = scopeSql(scope);
-  const rows = getDb()
-    .prepare(
-      `SELECT status, COUNT(*) c FROM orders
-       WHERE status IN ('received','preparing','ready') AND ${sql}
-       GROUP BY status`,
-    )
-    .all(...params) as { status: ActiveOrderStatus; c: number }[];
+): Promise<Record<ActiveOrderStatus, number>> {
+  const params: unknown[] = [db.tenantId];
+  const visitor = scopeSql(scope, params);
+  // COUNT(*) is int8, which node-postgres returns as a STRING. ::int keeps the
+  // arithmetic below working on numbers rather than concatenating strings.
+  const rows = await db.query<{ status: ActiveOrderStatus; c: number }>(
+    `SELECT status, COUNT(*)::int c FROM orders
+      WHERE tenant_id = $1 AND status IN ('received','preparing','ready') AND ${visitor}
+      GROUP BY status`,
+    params,
+  );
   const counts: Record<ActiveOrderStatus, number> = {
     received: 0,
     preparing: 0,

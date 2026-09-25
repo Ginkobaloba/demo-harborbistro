@@ -25,6 +25,7 @@ import {
   visitorIdForWrite,
 } from "@/lib/visitor";
 import type { Fulfillment } from "@/lib/types";
+import { withCurrentTenant } from "@/lib/tenant";
 
 // better-sqlite3 and the Stripe SDK both need the Node.js runtime.
 export const runtime = "nodejs";
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
 
   let priced;
   try {
-    priced = priceCart(body.lines);
+    priced = await withCurrentTenant((db) => priceCart(db, body.lines));
   } catch (err) {
     if (err instanceof CartError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
@@ -154,15 +155,26 @@ export async function POST(req: NextRequest) {
   // session exists, so a Stripe failure leaves no row behind.
   let orderId: string;
   try {
-    orderId = unusedOrderId();
+    orderId = await withCurrentTenant((db) => unusedOrderId(db));
   } catch (err) {
     logSaveFailure("(unminted)", err);
     return NextResponse.json({ error: ORDER_NOT_SAVED }, { status: 500 });
   }
 
+  // Descriptions are resolved in ONE transaction BEFORE the Stripe call, not
+  // per line inside the map: a transaction must never be held across a network
+  // round trip, and Stripe's is the slowest thing in this handler.
+  const descriptions = await withCurrentTenant(async (db) => {
+    const out = new Map<string, string>();
+    for (const line of priced.lines) {
+      out.set(line.slug, await lineDescription(db, line));
+    }
+    return out;
+  });
+
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
     priced.lines.map((line) => {
-      const description = lineDescription(line);
+      const description = descriptions.get(line.slug) ?? "";
       return {
         quantity: line.quantity,
         price_data: {
@@ -216,19 +228,25 @@ export async function POST(req: NextRequest) {
 
   let order;
   try {
-    order = createPendingOrder({
-      id: orderId,
-      stripeCheckoutSessionId: session.id,
-      lines: priced.lines,
-      subtotalCents: priced.subtotalCents,
+    // A SEPARATE transaction, after Stripe. D-017 requires the row to be
+    // written only once the session exists, so a Stripe failure leaves nothing
+    // behind -- and holding the earlier read transaction open across that call
+    // would have tied up a pooled client for the duration of a third-party API.
+    order = await withCurrentTenant((db) =>
+      createPendingOrder(db, {
+        id: orderId,
+        stripeCheckoutSessionId: session.id,
+        lines: priced.lines,
+        subtotalCents: priced.subtotalCents,
       tipCents,
       customerName,
       customerPhone,
-      customerEmail: customerEmailRaw || null,
+        customerEmail: customerEmailRaw || null,
       fulfillment,
-      deliveryAddress: fulfillment === "delivery" ? deliveryAddress : null,
-      visitorId: visitor.visitorId,
-    });
+        deliveryAddress: fulfillment === "delivery" ? deliveryAddress : null,
+        visitorId: visitor.visitorId,
+      }),
+    );
   } catch (err) {
     // The session exists but the row could not be written. The unused test
     // session simply expires at Stripe; the client gets a JSON error, not an

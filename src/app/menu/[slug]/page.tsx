@@ -6,6 +6,7 @@ import { DietaryBadges } from "@/components/menu/DietaryBadges";
 import { ItemCustomizer } from "@/components/menu/ItemCustomizer";
 import { formatPrice, getAllSlugs, getItemBySlug } from "@/lib/menu";
 import { COURSE_LABELS } from "@/lib/types";
+import { withCurrentTenant } from "@/lib/tenant";
 
 /**
  * Menu items only change at seed time (the DB ships baked into the image),
@@ -14,15 +15,18 @@ import { COURSE_LABELS } from "@/lib/types";
  */
 export const dynamicParams = false;
 
-export function generateStaticParams() {
-  return getAllSlugs().map((slug) => ({ slug }));
-}
+// NO generateStaticParams UNDER TENANCY. Pre-rendering menu pages at build
+// time assumes ONE menu; different restaurants have different slugs, so there
+// is no single set to render. It would also make the BUILD require a database,
+// which step 1 deliberately kept it free of. The page is server-rendered on
+// demand instead.
+export const dynamic = "force-dynamic";
 
 type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata(props: Props): Promise<Metadata> {
   const params = await props.params;
-  const item = getItemBySlug(params.slug);
+  const item = await withCurrentTenant((db) => getItemBySlug(db, params.slug));
   if (!item) return {};
   return {
     title: item.name,
@@ -32,7 +36,7 @@ export async function generateMetadata(props: Props): Promise<Metadata> {
 
 export default async function MenuItemPage(props: Props) {
   const params = await props.params;
-  const item = getItemBySlug(params.slug);
+  const item = await withCurrentTenant((db) => getItemBySlug(db, params.slug));
   if (!item) notFound();
 
   return (

@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import type { TenantDb } from "./pg";
 import {
   COURSES,
   type Course,
@@ -44,37 +44,42 @@ function toMenuItem(row: MenuItemRow): MenuItem {
   };
 }
 
-export function getFeaturedItems(): MenuItem[] {
-  const rows = getDb()
-    .prepare(
-      "SELECT * FROM menu_items WHERE is_featured = 1 ORDER BY sort_order",
-    )
-    .all() as MenuItemRow[];
+export async function getFeaturedItems(db: TenantDb): Promise<MenuItem[]> {
+  const rows = await db.query<MenuItemRow>(
+    "SELECT * FROM menu_items WHERE tenant_id = $1 AND is_featured = 1 ORDER BY sort_order",
+    [db.tenantId],
+  );
   return rows.map(toMenuItem);
 }
 
-export function getMenuByCourse(): Map<Course, MenuItem[]> {
-  const rows = getDb()
-    .prepare("SELECT * FROM menu_items ORDER BY sort_order")
-    .all() as MenuItemRow[];
+export async function getMenuByCourse(db: TenantDb): Promise<Map<Course, MenuItem[]>> {
+  const rows = await db.query<MenuItemRow>(
+    "SELECT * FROM menu_items WHERE tenant_id = $1 ORDER BY sort_order",
+    [db.tenantId],
+  );
   const grouped = new Map<Course, MenuItem[]>();
   for (const course of COURSES) grouped.set(course, []);
   for (const row of rows) grouped.get(row.course)!.push(toMenuItem(row));
   return grouped;
 }
 
-export function getAllSlugs(): string[] {
-  const rows = getDb()
-    .prepare("SELECT slug FROM menu_items ORDER BY sort_order")
-    .all() as { slug: string }[];
+export async function getAllSlugs(db: TenantDb): Promise<string[]> {
+  const rows = await db.query<{ slug: string }>(
+    "SELECT slug FROM menu_items WHERE tenant_id = $1 ORDER BY sort_order",
+    [db.tenantId],
+  );
   return rows.map((row) => row.slug);
 }
 
-export function getItemBySlug(slug: string): MenuItem | null {
-  const row = getDb()
-    .prepare("SELECT * FROM menu_items WHERE slug = ?")
-    .get(slug) as MenuItemRow | undefined;
-  return row ? toMenuItem(row) : null;
+export async function getItemBySlug(
+  db: TenantDb,
+  slug: string,
+): Promise<MenuItem | null> {
+  const rows = await db.query<MenuItemRow>(
+    "SELECT * FROM menu_items WHERE tenant_id = $1 AND slug = $2",
+    [db.tenantId, slug],
+  );
+  return rows[0] ? toMenuItem(rows[0]) : null;
 }
 
 export { formatPrice } from "./menu-format";

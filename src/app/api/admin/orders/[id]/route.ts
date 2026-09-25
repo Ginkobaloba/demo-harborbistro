@@ -9,6 +9,7 @@ import { ORDER_STATUS_LABELS } from "@/lib/types";
 import { BODY_LIMITS, asRecord, readJsonBody } from "@/lib/request-body";
 import { scopeFromRequest } from "@/lib/visitor";
 import { adminSurfacesEnabled } from "@/lib/admin-gate";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 
@@ -51,8 +52,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   try {
     const order =
       body.action === "advance"
-        ? advanceOrder(params.id, scope)
-        : cancelActiveOrder(params.id, scope);
+        ? await withCurrentTenant((db) => advanceOrder(db, params.id, scope))
+        : await withCurrentTenant((db) => cancelActiveOrder(db, params.id, scope));
     return NextResponse.json({
       id: order.id,
       status: order.status,

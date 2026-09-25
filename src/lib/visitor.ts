@@ -239,11 +239,30 @@ export function scopeFromRequest(req: Request): Promise<VisitorScope> {
  * visitor id both placeholders bind the seed marker, so the predicate still
  * matches seed rows only. NULL (legacy) rows never match.
  */
-export function scopeSql(scope: VisitorScope): { sql: string; params: [string, string] } {
-  return {
-    sql: "(visitor_id = ? OR visitor_id = ?)",
-    params: [SEED_VISITOR_ID, scope.visitorId ?? SEED_VISITOR_ID],
+/**
+ * The visitor half of the scoping, as a SQL fragment.
+ *
+ * IT APPENDS TO A CALLER-OWNED PARAMS ARRAY and numbers its own placeholders
+ * from the resulting positions. Postgres uses $1, $2... rather than SQLite's
+ * positional `?`, so a fragment cannot know its numbers in advance: the same
+ * clause is $2/$3 after one preceding parameter and $1/$2 after none.
+ * Hand-numbering is correct at exactly one call site and silently wrong at the
+ * others, which is how this first went in ("could not determine data type of
+ * parameter $1").
+ *
+ * THIS IS THE VISITOR DIMENSION ONLY. The tenant is enforced by RLS and by a
+ * separate `tenant_id = $n` in each query. The two are orthogonal: a visitor is
+ * not a principal the database knows about, and there are no per-visitor roles.
+ * See D-024.
+ */
+export function scopeSql(scope: VisitorScope, params: unknown[]): string {
+  const bind = (value: unknown): string => {
+    params.push(value);
+    return `$${params.length}`;
   };
+  const seed = bind(SEED_VISITOR_ID);
+  const own = bind(scope.visitorId ?? SEED_VISITOR_ID);
+  return `(visitor_id = ${seed} OR visitor_id = ${own})`;
 }
 
 // --- writes -----------------------------------------------------------------

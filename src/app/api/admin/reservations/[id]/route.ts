@@ -8,6 +8,7 @@ import type { ReservationStatus } from "@/lib/types";
 import { BODY_LIMITS, asRecord, readJsonBody } from "@/lib/request-body";
 import { scopeFromRequest } from "@/lib/visitor";
 import { adminSurfacesEnabled } from "@/lib/admin-gate";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 
@@ -48,7 +49,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   try {
-    const reservation = setReservationStatus(params.id, status, scope);
+    const reservation = await withCurrentTenant((db) =>
+      setReservationStatus(db, params.id, status, scope),
+    );
     return NextResponse.json({
       id: reservation.id,
       status: reservation.status,

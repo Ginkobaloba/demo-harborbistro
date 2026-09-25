@@ -2,12 +2,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { getFeaturedItems, formatPrice } from "@/lib/menu";
 import { RESTAURANT } from "@/lib/restaurant";
+import { withCurrentTenant } from "@/lib/tenant";
 
 const HERO_URL =
   "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1600&q=70";
 
-export default function Home() {
-  const featured = getFeaturedItems();
+export default async function Home() {
+  const featured = await withCurrentTenant((db) => getFeaturedItems(db));
 
   return (
     <main>

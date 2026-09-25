@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getOrder } from "@/lib/orders";
 import { ORDER_STATUS_LABELS } from "@/lib/types";
 import { scopeFromRequest } from "@/lib/visitor";
+import { withCurrentTenant } from "@/lib/tenant";
 
 // better-sqlite3 needs the Node.js runtime.
 export const runtime = "nodejs";
@@ -20,7 +21,8 @@ export const runtime = "nodejs";
  */
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const order = getOrder(params.id, await scopeFromRequest(req));
+  const scope = await scopeFromRequest(req);
+  const order = await withCurrentTenant((db) => getOrder(db, params.id, scope));
   if (!order) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }

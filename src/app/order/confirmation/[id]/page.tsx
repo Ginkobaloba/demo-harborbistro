@@ -7,6 +7,7 @@ import { getOrder, lineDescription, markOrderPaid } from "@/lib/orders";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { OrderTracker } from "@/components/order/OrderTracker";
 import { readVisitorScope } from "@/lib/visitor-server";
+import { withCurrentTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -25,8 +26,12 @@ export default async function OrderConfirmationPage(props: Props) {
   // Only a seed order or one this browser placed resolves (D-016). The check
   // runs before the Stripe reconcile below, so another visitor's order code
   // can neither be viewed nor nudged from here.
-  let order = getOrder(params.id, await readVisitorScope());
-  if (!order) notFound();
+  const scope = await readVisitorScope();
+  const found = await withCurrentTenant((db) => getOrder(db, params.id, scope));
+  if (!found) notFound();
+  // A separate binding from `found` so the null-narrowing above survives the
+  // reconcile reassignment below; `let order: Order | null` would discard it.
+  let order = found;
 
   // Safety net: reconcile against Stripe in case the webhook is delayed or not
   // configured. Idempotent, and scoped to this order's own session.
@@ -47,12 +52,28 @@ export default async function OrderConfirmationPage(props: Props) {
           typeof session.payment_intent === "string"
             ? session.payment_intent
             : (session.payment_intent?.id ?? null);
-        order = markOrderPaid(order.id, paymentIntentId) ?? order;
+        // Its own transaction, AFTER the Stripe round trip. Holding one open
+        // across that call would tie up a pooled client for the duration of a
+        // third-party API.
+        order =
+          (await withCurrentTenant((db) =>
+            markOrderPaid(db, order.id, paymentIntentId),
+          )) ?? order;
       }
     } catch {
       // Leave the order pending and show the pending state below.
     }
   }
+
+  // Option labels resolved once, server-side: a JSX render callback cannot
+  // await, so they must arrive already resolved.
+  const descriptions = await withCurrentTenant(async (db) => {
+    const out = new Map<string, string>();
+    for (const line of order.items) {
+      if (!out.has(line.slug)) out.set(line.slug, await lineDescription(db, line));
+    }
+    return out;
+  });
 
   const paid = order.status !== "pending" && order.status !== "cancelled";
 
@@ -127,7 +148,7 @@ export default async function OrderConfirmationPage(props: Props) {
 
           <ul className="divide-y divide-harbor-line">
             {order.items.map((line, i) => {
-              const detail = lineDescription(line);
+              const detail = descriptions.get(line.slug) ?? "";
               return (
                 <li key={i} className="flex items-start justify-between gap-4 py-3">
                   <div>
