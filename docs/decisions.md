@@ -709,3 +709,59 @@ confirmations, the orders API and reservation detail to anyone who guesses a
 this file only after the demo app fix is deployed AND verified on the live
 subdomain", and nothing enforces that. Treat it as a note to a human, and do
 the verification rather than trusting that the sentence has protected anyone.
+
+## D-024: Postgres tenancy, with visitor scoping kept as a separate dimension (2026-09-25)
+
+First step of the port off SQLite, reusing the pattern proven on demo-axlepoint
+(D-022..D-027 there) rather than rederiving it. Schema and isolation suite
+only: no query is ported, nothing is wired into the app, and `src/lib/db.ts`
+stays until its replacement exists.
+
+**Tenancy is two-dimensional, and the dimensions are enforced at different
+layers.** `tenant_id` is which restaurant; `visitor_id` (D-016) is which
+browser created the row. RLS enforces the tenant. The visitor stays in the
+WHERE clause, because a visitor is not a principal the database knows about
+and there are no per-visitor roles. The isolation suite tests them as two
+labelled layers, and every LAYER 2 assertion would pass against a database
+with no policies at all -- which is the point: proving tenant isolation says
+nothing about visitor isolation, and both being called "scoping" makes them
+easy to conflate.
+
+**The harbor-specific leak is what LAYER 2 exists for.** Public order ids are a
+5-symbol code over a 31-character alphabet: 31^5 = 28,629,151. Enumerable at
+scale, and not a secret. So "knowing a valid code" must not be enough to read
+the record, and the suite asserts visitor A cannot read visitor B's order EVEN
+WITH A VALID CODE -- while seed rows stay shared, which a naive "can read
+nothing but its own" test would have flagged as a leak.
+
+**`menu_items.slug` was globally UNIQUE and is now `UNIQUE (tenant_id, slug)`.**
+Kept global, two restaurants could not both have a "fish-tacos" slug: the first
+tenant works perfectly and the second silently cannot exist. This shape is why
+demo-axlepoint #46 added an assertion for it; harbor is the demo that has it.
+
+**The `created_at` default is a dialect trap.** SQLite used
+`DEFAULT (datetime('now'))`, producing `2026-09-25 11:30:00`, and the app reads
+that shape. Postgres has no `datetime()`. Dropping the default would leave rows
+with whatever the caller passed; a `now()` default would store a DIFFERENT
+FORMAT the app then misreads. The `to_char(now() AT TIME ZONE 'UTC', ...)`
+default reproduces the exact string, verified through a real INSERT against
+both engines.
+
+**Not ported here:** every query, the seed, and the reset. **Deliberately
+deleted rather than ported:** `getOrderByCheckoutSession`, which did an
+unscoped lookup and has exactly one reference in the repo -- its own
+definition.
+
+### The test guard that had to change, and why
+
+`requireScratchDatabase` checked the URL for `prod`, `neon` and `portal`. That
+is a check for a SMELL, not for IDENTITY, and it is not sufficient: while
+building this suite a docker port binding silently failed and
+`localhost:55434` turned out to belong to ANOTHER SESSION's scratch database.
+The connection was refused only because its password differed. Had the
+credentials matched, `beforeAll` would have run `DROP SCHEMA public CASCADE` on
+someone else's data -- and "another developer's scratch database" passes a
+prod-smell check perfectly.
+
+So the suite now refuses to drop anything in a database whose `public` schema
+holds tables it does not own. One unfamiliar table and it stops, naming them.
