@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getKitchenCounts } from "@/lib/orders";
@@ -6,6 +7,7 @@ import {
   todayLocalDate,
 } from "@/lib/reservations";
 import { readVisitorScope } from "@/lib/visitor-server";
+import { adminSurfacesEnabled } from "@/lib/admin-gate";
 import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +17,9 @@ export const metadata: Metadata = {
 };
 
 export default async function AdminHomePage() {
+  // App-level gate (D-022): closed by default, ahead of everything else.
+  if (!adminSurfacesEnabled()) notFound();
+
   // Seed records plus this browser's own orders and bookings only (D-016).
   const scope = await readVisitorScope();
   const counts = getKitchenCounts(scope);

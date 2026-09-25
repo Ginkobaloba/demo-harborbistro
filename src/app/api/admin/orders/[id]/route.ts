@@ -8,6 +8,7 @@ import {
 import { ORDER_STATUS_LABELS } from "@/lib/types";
 import { BODY_LIMITS, asRecord, readJsonBody } from "@/lib/request-body";
 import { scopeFromRequest } from "@/lib/visitor";
+import { adminSurfacesEnabled } from "@/lib/admin-gate";
 
 export const runtime = "nodejs";
 
@@ -23,8 +24,15 @@ export const runtime = "nodejs";
  * but it only acts on the fictional seed orders plus orders this browser
  * placed. Any other id, including another visitor's real order, is 404 with
  * the same body as an unknown id.
+ *
+ * App-level gate (D-022): closed by default. Checked first, before params,
+ * body parsing, or any DB access, so a closed gate never causes a side
+ * effect.
  */
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  if (!adminSurfacesEnabled()) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
   const params = await props.params;
   const scope = await scopeFromRequest(req);
   const read = await readJsonBody(req, BODY_LIMITS.adminAction);

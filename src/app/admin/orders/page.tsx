@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { formatPrice } from "@/lib/menu-format";
@@ -13,6 +14,7 @@ import { AutoRefresh } from "@/components/admin/AutoRefresh";
 import { OrderActions } from "@/components/admin/OrderActions";
 import { DemoScopeNote } from "@/components/admin/DemoScopeNote";
 import { readVisitorScope } from "@/lib/visitor-server";
+import { adminSurfacesEnabled } from "@/lib/admin-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +90,9 @@ function OrderCard({ order }: { order: Order }) {
 }
 
 export default async function AdminOrdersPage() {
+  // App-level gate (D-022): closed by default, ahead of everything else.
+  if (!adminSurfacesEnabled()) notFound();
+
   // Seed orders plus this browser's own orders only (D-016).
   const scope = await readVisitorScope();
   const active = getActiveOrders(scope);

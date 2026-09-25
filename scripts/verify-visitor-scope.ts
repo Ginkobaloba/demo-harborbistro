@@ -3,8 +3,13 @@
  * against a running server. Each "browser" is its own cookie jar, the same
  * isolation two Playwright browser contexts give.
  *
+ * The admin views/actions this script checks are behind the app-level admin
+ * gate (D-022, src/lib/admin-gate.ts), off by default: start the server with
+ * HARBOR_ADMIN_ENABLED=1 or every /admin* check below fails closed (404)
+ * instead of exercising D-016 scoping.
+ *
  *   npm run build
- *   SESSION_SECRET=<32+ random chars> HARBOR_DB_PATH=<copy of a seeded db> npx next start -p 3107
+ *   SESSION_SECRET=<32+ random chars> HARBOR_DB_PATH=<copy of a seeded db> HARBOR_ADMIN_ENABLED=1 npx next start -p 3107
  *   BASE_URL=http://localhost:3107 HARBOR_DB_PATH=<same path> npm run verify:visitor-scope
  *
  * Local servers only: it books a reservation and (when HARBOR_DB_PATH is set)

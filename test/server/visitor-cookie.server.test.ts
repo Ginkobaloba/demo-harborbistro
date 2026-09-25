@@ -24,6 +24,11 @@ const STRIPE_PLACEHOLDER = {
   STRIPE_SECRET_KEY: "sk_test_server_suite_placeholder",
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "",
 };
+// This file's whole point is the signed visitor cookie (D-018) exercised
+// against /admin, so the app-level admin gate (D-022) must be open on every
+// server this file starts; its own closed/open behavior is covered
+// separately in admin-gate.test.ts.
+const ADMIN_OPEN = { HARBOR_ADMIN_ENABLED: "1" };
 
 function b64url(buf: Buffer): string {
   return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -81,6 +86,7 @@ describe("signed visitor cookie on the real server (SESSION_SECRET set)", () => 
   beforeAll(async () => {
     srv = await startServer({
       ...STRIPE_PLACEHOLDER,
+      ...ADMIN_OPEN,
       HARBOR_DB_PATH: DB,
       HARBOR_RETENTION_DISABLED: "1",
       SESSION_SECRET: SECRET,
@@ -196,7 +202,7 @@ describe("no usable SESSION_SECRET on the real server (D-018)", () => {
   beforeAll(async () => {
     // Same database, restarted without the secret.
     srv = await startServer(
-      { ...STRIPE_PLACEHOLDER, HARBOR_DB_PATH: DB, HARBOR_RETENTION_DISABLED: "1" },
+      { ...STRIPE_PLACEHOLDER, ...ADMIN_OPEN, HARBOR_DB_PATH: DB, HARBOR_RETENTION_DISABLED: "1" },
       ["SESSION_SECRET"],
     );
   }, 40_000);
