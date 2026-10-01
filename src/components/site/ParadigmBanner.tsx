@@ -79,7 +79,7 @@ export function ParadigmBanner() {
       <span>
         {"Built by Paradigm Coding Solutions. Want one like it for your data? "}
         <a
-          href="https://projectnexuscode.org/contact"
+          href="https://paradigm.codes/contact"
           target="_blank"
           rel="noopener noreferrer"
           style={styles.link}

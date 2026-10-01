@@ -5,7 +5,7 @@ upscale-casual coastal-American restaurant in a Great Lakes city. Built as
 a portfolio demonstration by Paradigm Coding Solutions; Harbor Bistro is
 positioned as a client, so it carries its own brand identity.
 
-Live at https://harborbistro.projectnexuscode.org (all orders and
+Live at https://harborbistro.paradigm.codes (all orders and
 reservations are demo-only and not real).
 
 ## Stack
@@ -49,7 +49,9 @@ are harmless. Orders also reconcile on the confirmation page via
 To enable it for the deployed demo (Stripe **test mode**):
 
 1. Stripe Dashboard (test mode) > Developers > Webhooks > Add endpoint:
-   `https://harborbistro.projectnexuscode.org/api/webhooks/stripe`
+   `https://harborbistro.paradigm.codes/api/webhooks/stripe` (Stripe does not
+   follow redirects, so an endpoint still on the old projectnexuscode.org host
+   stops delivering once that host 301s)
 2. Select events `checkout.session.completed` and `checkout.session.expired`.
 3. Reveal the endpoint's signing secret and put it in the deploy env file as
    `STRIPE_WEBHOOK_SECRET=whsec_...`, then redeploy the container.
@@ -108,7 +110,7 @@ This repo carries a `verify/` suite (see `verify/README.md` for full details).
 
 **Quick smoke** -- run on every PR via CI, checks HTTP status, key copy, and
 security headers against the live deploy at
-`https://harborbistro.projectnexuscode.org`:
+`https://harborbistro.paradigm.codes`:
 
 ```
 /verify verify/smoke.yml
