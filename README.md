@@ -128,3 +128,7 @@ accessibility, and LCP; layers 5-6 run locally with a headed browser:
 `deep-verify` to pass (a committed report under `verify/reports/` recording
 `Overall: PASS`). Add `deep-verify` as a required status check in branch
 protection to enforce the gate.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
