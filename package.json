@@ -28,7 +28,7 @@
     "@paradigm-codes/auth": "^0.1.0",
     "better-sqlite3": "^12.10.0",
     "jose": "^6.2.3",
-    "next": "15.5.25",
+    "next": "15.5.27",
     "pg": "^8.23.0",
     "pg-types": "^4.1.0",
     "react": "^18",
