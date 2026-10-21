@@ -10,7 +10,7 @@ reservations are demo-only and not real).
 
 ## Stack
 
-- Next.js 14 (App Router), TypeScript, Tailwind CSS
+- Next.js 15.5 (App Router), TypeScript, Tailwind CSS
 - SQLite via better-sqlite3, baked into the image at build time
 - Stripe Test Mode for checkout (test card 4242 4242 4242 4242)
 - Single standalone-output container, deployed behind the shared
