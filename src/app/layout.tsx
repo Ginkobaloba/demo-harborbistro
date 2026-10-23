@@ -19,7 +19,7 @@ const inter = Inter({
   variable: "--font-sans",
 });
 
-const SITE_URL = "https://harborbistro.projectnexuscode.org";
+const SITE_URL = "https://harborbistro.paradigm.codes";
 const SITE_DESCRIPTION =
   "Coastal-inspired, locally sourced, weeknight-easy. Harbor Bistro serves upscale-casual coastal American food on the harborfront. Order online for pickup or delivery, or reserve a table.";
 

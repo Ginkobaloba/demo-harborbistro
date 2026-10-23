@@ -9,7 +9,7 @@
 #   json_path_equals  -- checks that a JSONPath expression equals `expect`
 
 target: demo-harborbistro
-deploy_url: https://harborbistro.projectnexuscode.org
+deploy_url: https://harborbistro.paradigm.codes
 
 surfaces:
   - name: home
